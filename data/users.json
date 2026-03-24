@@ -1,0 +1,20 @@
+[
+  {
+    "id": "1774366309961",
+    "fullName": "Mahamadi TASSEMBEDO",
+    "phone": "+226 64046120",
+    "email": "dalletv330@gmail.com",
+    "password": "$2a$10$fFBQRByugJ7J6uYqFPSSAuaeoGQGg8eUfOzjNsANzld4lQSbb4voS",
+    "role": "admin",
+    "createdAt": "2026-03-24T15:31:49.961Z"
+  },
+  {
+    "id": "1774370857615",
+    "fullName": "Habibou ILBOUDO",
+    "phone": "+ 226 62614653",
+    "email": "habibouilboudo@gmail.com",
+    "password": "$2a$10$C4vggHz9PeMUc0L0LrLuiOL5Cph7HTAQ8WFQ59UomLcJ6PgQN4eSu",
+    "role": "user",
+    "createdAt": "2026-03-24T16:47:37.615Z"
+  }
+]
