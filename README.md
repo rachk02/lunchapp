@@ -1,19 +1,19 @@
-# 🍽️ LunchApp — Application de commande de repas
+# LunchApp — Application de commande de repas
 
 Application web permettant aux employés de choisir leur repas du midi.
 
 ## 📋 Fonctionnalités
 
-- ✅ Création de compte (Nom, Téléphone, Email, Mot de passe)
-- ✅ Connexion sécurisée (JWT)
-- ✅ Liste de 9 plats dont "Autres" personnalisable
-- ✅ Choix visibles par toute l'équipe en temps réel
-- ✅ Modification / Suppression de son propre choix
-- ✅ Historique des repas datés par utilisateur
-- ✅ Lancement de commande journalière (Admin)
-- ✅ Palette orange 🟠 + bleu ciel 🔵
+- Création de compte (Nom, Téléphone, Email, Mot de passe)
+- Connexion sécurisée (JWT)
+- Liste de 9 plats dont "Autres" personnalisable
+- Choix visibles par toute l'équipe en temps réel
+- Modification / Suppression de son propre choix
+- Historique des repas datés par utilisateur
+- Lancement de commande journalière (Admin)
+- Palette orange  + bleu ciel 
 
-## 🚀 Installation & Démarrage
+## Installation & Démarrage
 
 ### Prérequis
 - Node.js v16+ installé
@@ -37,12 +37,12 @@ npm run dev
 ### Accès
 Ouvrez votre navigateur sur : **http://localhost:3000**
 
-## 👨‍💼 Rôle Admin
+##  Rôle Admin
 
 Le **premier compte créé** obtient automatiquement le rôle **Admin (Chargé de commande)**.
 Il peut voir le bouton "Lancer la commande" et valider les commandes du jour.
 
-## 📁 Structure du projet
+##  Structure du projet
 
 ```
 lunchapp/
@@ -57,13 +57,13 @@ lunchapp/
     └── app.js         # Logique frontend
 ```
 
-## 🔒 Sécurité
+##  Sécurité
 
 - Mots de passe hashés avec bcrypt
 - Authentification par JWT (expire après 7 jours)
 - Les données sont stockées dans `data/` (fichiers JSON locaux)
 
-## ⚙️ Configuration
+##  Configuration
 
 Variables d'environnement optionnelles :
 - `PORT` : Port du serveur (défaut: 3000)

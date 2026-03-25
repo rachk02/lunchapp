@@ -1,858 +1,703 @@
 <!DOCTYPE html>
-<!-- Déclaration du type de document HTML5 -->
-
 <html lang="fr">
-<!-- Balise racine avec l'attribut de langue française (utile pour l'accessibilité et le SEO) -->
-
 <head>
-  <!-- Section d'en-tête : métadonnées, styles, scripts de chargement -->
-
   <meta charset="UTF-8" />
-  <!-- Encodage des caractères : UTF-8 supporte tous les caractères spéciaux et accents -->
-
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <!-- Rend la page responsive : adapte la largeur à l'écran de l'appareil, zoom initial = 1 -->
-
-  <title>LunchApp — Repas du midi</title>
-  <!-- Titre affiché dans l'onglet du navigateur -->
-
+  <title>LunchApp — Gestion des repas d'entreprise</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <!-- Pré-connexion au serveur Google Fonts pour accélérer le chargement des polices -->
-
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <!-- Pré-connexion au CDN des fichiers de polices (crossorigin nécessaire pour les ressources tierces) -->
-
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <!-- Chargement des polices : Plus Jakarta Sans (texte courant) et Outfit (titres), plusieurs graisses -->
-
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <!-- Chargement de la bibliothèque jsPDF (depuis CDN) pour la génération de PDF côté navigateur -->
-
   <link rel="stylesheet" href="style.css" />
-  <!-- Lien vers la feuille de styles principale de l'application -->
 </head>
-
 <body>
-<!-- Corps de la page : contient tout le contenu visible -->
 
-  <!-- ══════════════════ ÉCRAN D'AUTHENTIFICATION ══════════════════ -->
-  <!-- Cet écran est affiché par défaut ; il sera masqué après connexion/inscription -->
-  <div id="auth-screen" class="screen active">
-  <!-- Conteneur principal de l'écran d'auth. La classe "active" le rend visible via CSS -->
+<!--ÉCRAN 1 — LANDING PAGE-->
+<div id="landing-screen" class="screen active">
 
-    <div class="auth-layout">
-    <!-- Grille CSS 2 colonnes : colonne gauche (présentation) + colonne droite (formulaire) -->
-
-      <!-- ── Colonne gauche : branding et présentation ── -->
-      <div class="auth-left">
-      <!-- Panneau gauche à fond sombre avec les informations de présentation de l'app -->
-
-        <div class="auth-left-content">
-        <!-- Contenu textuel du panneau gauche, positionné par-dessus les cercles décoratifs -->
-
-          <div class="auth-logo">
-          <!-- Conteneur du logo de l'application -->
-
-            <div class="logo-ring"><span>🍽️</span></div>
-            <!-- Anneau décoratif avec l'emoji assiette ; animé en pulsation via CSS -->
-          </div>
-
-          <h1 class="auth-headline">Votre repas du midi,<br/><em>organisé ensemble</em></h1>
-          <!-- Titre principal de présentation ; <em> utilisé pour colorer "organisé ensemble" en orange -->
-
-          <p class="auth-sub">Choisissez votre plat, suivez les commandes de votre équipe et communiquez avec la restauratrice — tout en un seul endroit.</p>
-          <!-- Sous-titre décrivant les fonctionnalités principales de l'application -->
-
-          <div class="auth-features">
-          <!-- Liste visuelle des fonctionnalités clés de l'application -->
-
-            <div class="feat"><span class="feat-dot"></span> Choix de repas en temps réel</div>
-            <!-- Fonctionnalité 1 : avec un point coloré comme puce -->
-
-            <div class="feat"><span class="feat-dot"></span> Suivi des commandes de l'équipe</div>
-            <!-- Fonctionnalité 2 -->
-
-            <div class="feat"><span class="feat-dot"></span> Messagerie intégrée</div>
-            <!-- Fonctionnalité 3 -->
-
-            <div class="feat"><span class="feat-dot"></span> Historique &amp; export PDF</div>
-            <!-- Fonctionnalité 4 : &amp; est l'entité HTML pour le caractère "&" -->
-          </div>
-        </div>
-
-        <div class="auth-left-deco">
-        <!-- Conteneur des éléments décoratifs (cercles en arrière-plan) -->
-
-          <div class="deco-circle dc1"></div>
-          <!-- Grand cercle décoratif en haut à droite -->
-
-          <div class="deco-circle dc2"></div>
-          <!-- Cercle décoratif moyen en bas à gauche -->
-
-          <div class="deco-circle dc3"></div>
-          <!-- Petit cercle décoratif au centre droit -->
-        </div>
+  <!-- NAVBAR -->
+  <header class="land-nav">
+    <div class="land-nav-brand">
+      <div class="land-nav-icon-wrap">
+        <span>🍽️</span>
       </div>
-
-      <!-- ── Colonne droite : formulaires de connexion / inscription ── -->
-      <div class="auth-right">
-      <!-- Panneau blanc à droite contenant les formulaires -->
-
-        <div class="auth-form-wrapper">
-        <!-- Wrapper centré (max-width 440px) contenant les onglets et formulaires -->
-
-          <div class="tab-pills">
-          <!-- Sélecteur d'onglets en forme de pilules pour basculer entre Connexion et Inscription -->
-
-            <button class="tab-pill active" data-tab="login">Connexion</button>
-            <!-- Onglet "Connexion" actif par défaut ; data-tab="login" permet au JS d'identifier l'onglet cible -->
-
-            <button class="tab-pill" data-tab="register">Nouveau compte</button>
-            <!-- Onglet "Nouveau compte" inactif par défaut -->
-          </div>
-
-          <!-- ── Formulaire de connexion ── -->
-          <form id="login-form" class="auth-form active">
-          <!-- Formulaire de connexion visible par défaut (classe "active") -->
-
-            <div class="form-title">
-            <!-- En-tête du formulaire avec titre et description -->
-
-              <h2>Bon retour 👋</h2>
-              <!-- Titre accueillant de la section connexion -->
-
-              <p>Connectez-vous pour voir les repas du jour</p>
-              <!-- Description courte de l'action -->
-            </div>
-
-            <div class="field">
-            <!-- Groupe de champ : label + input avec icône -->
-
-              <label>Adresse email</label>
-              <!-- Étiquette visible au-dessus du champ -->
-
-              <div class="field-input-wrap">
-              <!-- Wrapper relatif permettant de positionner l'icône en absolu à l'intérieur -->
-
-                <svg class="field-icon" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"/>
-                  <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"/>
-                </svg>
-                <!-- Icône SVG d'enveloppe positionnée à gauche du champ email -->
-
-                <input type="email" id="login-email" placeholder="prenom@societe.com" autocomplete="email" required />
-                <!-- Champ email : type="email" valide le format, autocomplete aide le navigateur à suggérer des valeurs -->
-              </div>
-            </div>
-
-            <div class="field">
-            <!-- Groupe de champ pour le mot de passe -->
-
-              <label>Mot de passe</label>
-              <!-- Étiquette du champ mot de passe -->
-
-              <div class="field-input-wrap">
-              <!-- Wrapper pour positionner l'icône et le bouton toggle -->
-
-                <svg class="field-icon" viewBox="0 0 20 20" fill="currentColor">
-                  <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/>
-                </svg>
-                <!-- Icône SVG de cadenas pour indiquer que c'est un champ sécurisé -->
-
-                <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" required />
-                <!-- Champ mot de passe masqué par défaut ; autocomplete="current-password" aide le gestionnaire de mots de passe -->
-
-                <button type="button" class="eye-btn" onclick="togglePwd('login-password',this)">
-                <!-- Bouton pour afficher/masquer le mot de passe. type="button" évite la soumission du formulaire -->
-
-                  <svg viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/>
-                    <path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/>
-                  </svg>
-                  <!-- Icône œil SVG pour indiquer la fonctionnalité de visibilité du mot de passe -->
-                </button>
-              </div>
-            </div>
-
-            <div id="login-error" class="form-error hidden"></div>
-            <!-- Zone d'affichage des erreurs de connexion. Cachée par défaut, remplie par le JS en cas d'erreur -->
-
-            <button type="submit" class="btn-submit">
-            <!-- Bouton de soumission du formulaire de connexion -->
-
-              Se connecter
-              <!-- Texte du bouton -->
-
-              <svg viewBox="0 0 20 20" fill="currentColor">
-                <path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"/>
-              </svg>
-              <!-- Icône flèche droite pour renforcer l'action de connexion -->
-            </button>
-          </form>
-
-          <!-- ── Formulaire d'inscription ── -->
-          <form id="register-form" class="auth-form">
-          <!-- Formulaire d'inscription. Pas de classe "active" : caché par défaut -->
-
-            <div class="form-title">
-              <h2>Créer un compte 🚀</h2>
-              <!-- Titre enthousiaste pour encourager l'inscription -->
-
-              <p>Rejoignez votre équipe sur LunchApp</p>
-              <!-- Invitation à rejoindre l'équipe -->
-            </div>
-
-            <div class="role-selector">
-            <!-- Sélecteur visuel du rôle de l'utilisateur (Employé ou Restauratrice) -->
-
-              <div class="role-option active" data-role="user" onclick="selectRole('user', this)">
-              <!-- Option "Employé" sélectionnée par défaut (classe "active"). onclick appelle selectRole() -->
-
-                <span class="role-emoji">👤</span>
-                <!-- Emoji représentant un employé -->
-
-                <span class="role-label">Employé(e)</span>
-                <!-- Libellé du rôle -->
-
-                <div class="role-check">✓</div>
-                <!-- Coche visible uniquement quand l'option est sélectionnée (contrôlé par CSS) -->
-              </div>
-
-              <div class="role-option" data-role="restauratrice" onclick="selectRole('restauratrice', this)">
-              <!-- Option "Restauratrice" non sélectionnée par défaut -->
-
-                <span class="role-emoji">👩‍🍳</span>
-                <!-- Emoji représentant une cuisinière -->
-
-                <span class="role-label">Restauratrice</span>
-                <!-- Libellé du rôle -->
-
-                <div class="role-check">✓</div>
-                <!-- Coche de sélection -->
-              </div>
-            </div>
-
-            <input type="hidden" id="reg-role" value="user" />
-            <!-- Champ caché stockant le rôle sélectionné. Sa valeur est mise à jour par selectRole() en JS -->
-
-            <div class="fields-row">
-            <!-- Conteneur CSS Grid à 2 colonnes pour afficher Nom et Téléphone côte à côte -->
-
-              <div class="field">
-                <label>Nom complet</label>
-                <!-- Étiquette du champ nom complet -->
-
-                <div class="field-input-wrap">
-                  <svg class="field-icon" viewBox="0 0 20 20" fill="currentColor">
-                    <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/>
-                  </svg>
-                  <!-- Icône SVG de silhouette utilisateur -->
-
-                  <input type="text" id="reg-name" placeholder="Prénom Nom" required />
-                  <!-- Champ texte pour le nom complet. required = validation native HTML5 -->
-                </div>
-              </div>
-
-              <div class="field">
-                <label>Téléphone</label>
-                <!-- Étiquette du champ téléphone -->
-
-                <div class="field-input-wrap">
-                  <svg class="field-icon" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"/>
-                  </svg>
-                  <!-- Icône SVG de téléphone -->
-
-                  <input type="tel" id="reg-phone" placeholder="+226 XX XX XX XX" required />
-                  <!-- Champ téléphone. type="tel" affiche un clavier numérique sur mobile -->
-                </div>
-              </div>
-            </div>
-
-            <div class="field">
-              <label>Adresse email</label>
-              <div class="field-input-wrap">
-                <svg class="field-icon" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"/>
-                  <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"/>
-                </svg>
-                <!-- Icône SVG d'enveloppe pour le champ email -->
-
-                <input type="email" id="reg-email" placeholder="prenom@societe.com" autocomplete="email" required />
-                <!-- Champ email d'inscription avec validation de format -->
-              </div>
-            </div>
-
-            <div class="field">
-              <label>Mot de passe</label>
-              <div class="field-input-wrap">
-                <svg class="field-icon" viewBox="0 0 20 20" fill="currentColor">
-                  <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/>
-                </svg>
-                <!-- Icône cadenas pour le champ mot de passe -->
-
-                <input type="password" id="reg-password" placeholder="Minimum 6 caractères" autocomplete="new-password" required minlength="6" />
-                <!-- Champ mot de passe. minlength="6" impose une longueur minimale de 6 caractères -->
-
-                <button type="button" class="eye-btn" onclick="togglePwd('reg-password',this)">
-                <!-- Bouton toggle visibilité du mot de passe d'inscription -->
-                  <svg viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/>
-                    <path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/>
-                  </svg>
-                  <!-- Icône œil SVG -->
-                </button>
-              </div>
-            </div>
-
-            <div id="register-error" class="form-error hidden"></div>
-            <!-- Zone d'affichage des erreurs d'inscription. Cachée par défaut -->
-
-            <button type="submit" class="btn-submit">
-            <!-- Bouton de soumission du formulaire d'inscription -->
-              Créer mon compte
-              <svg viewBox="0 0 20 20" fill="currentColor">
-                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
-              </svg>
-              <!-- Icône coche pour confirmer la création de compte -->
-            </button>
-          </form>
-
-        </div>
-      </div>
+      <span class="land-nav-title">LunchApp</span>
     </div>
+    <nav class="land-nav-links">
+      <a href="#features" class="land-nav-link">Fonctionnalités</a>
+      <a href="#how" class="land-nav-link">Comment ça marche</a>
+    </nav>
+    <div class="land-nav-actions">
+      <button class="btn-outline-nav" onclick="goToLogin()">Connexion</button>
+      <button class="btn-cta-nav" onclick="goToRegisterEnterprise()">
+        Commencer gratuitement
+      </button>
+    </div>
+    <!-- Hamburger mobile -->
+    <button class="hamburger" id="hamburger" onclick="toggleMenu()" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+  </header>
+
+  <!-- Menu mobile -->
+  <div class="mobile-menu hidden" id="mobile-menu">
+    <a href="#features" class="mob-link" onclick="toggleMenu()">Fonctionnalités</a>
+    <a href="#how" class="mob-link" onclick="toggleMenu()">Comment ça marche</a>
+    <button class="mob-btn-login" onclick="goToLogin(); toggleMenu()">Se connecter</button>
+    <button class="mob-btn-start" onclick="goToRegisterEnterprise(); toggleMenu()">Commencer gratuitement</button>
   </div>
 
-  <!-- ══════════════════ ÉCRAN PRINCIPAL DE L'APPLICATION ══════════════════ -->
-  <!-- Cet écran est masqué par défaut ; affiché après authentification réussie -->
-  <div id="app-screen" class="screen">
-
-    <!-- ── Barre de navigation supérieure (desktop) ── -->
-    <nav class="topnav">
-    <!-- Barre de navigation sticky en haut de page, cachée sur mobile -->
-
-      <div class="nav-brand">
-      <!-- Logo et nom de l'application à gauche de la navbar -->
-
-        <div class="nav-logo">🍽️</div>
-        <!-- Emoji logo de l'application -->
-
-        <span class="nav-title">LunchApp</span>
-        <!-- Nom de l'application avec dégradé orange-bleu via CSS -->
-      </div>
-
-      <div class="nav-center">
-      <!-- Zone centrale de la navbar affichant la date du jour -->
-
-        <div class="nav-date" id="nav-date"></div>
-        <!-- Date du jour remplie dynamiquement par setNavDate() en JS -->
-      </div>
-
-      <div class="nav-end">
-      <!-- Groupe d'actions à droite de la navbar -->
-
-        <button class="nav-icon-btn" id="nav-msg-btn" onclick="showSection('messages')" title="Messages">
-        <!-- Bouton icône pour accéder à la messagerie. Caché pour les employés simples -->
-
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
-          </svg>
-          <!-- Icône SVG de bulle de message -->
-
-          <span class="notif-dot hidden" id="msg-notif-dot"></span>
-          <!-- Point rouge de notification. Caché par défaut, affiché quand des messages non lus existent -->
-        </button>
-
-        <button class="nav-icon-btn" onclick="showSection('history')" title="Historique">
-        <!-- Bouton pour accéder à l'historique des repas -->
-
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-          </svg>
-          <!-- Icône SVG d'horloge pour représenter l'historique -->
-        </button>
-
-        <div class="nav-user">
-        <!-- Chip d'informations sur l'utilisateur connecté -->
-
-          <div class="nav-avatar" id="nav-avatar"></div>
-          <!-- Cercle avec l'initiale de l'utilisateur (rempli par le JS après connexion) -->
-
-          <div class="nav-user-info">
-          <!-- Bloc texte avec prénom et rôle -->
-
-            <span id="nav-user-name"></span>
-            <!-- Prénom de l'utilisateur connecté (rempli par le JS) -->
-
-            <span class="nav-role-badge" id="nav-role-badge"></span>
-            <!-- Badge de rôle : "👨‍💼 Chargé de commande", "👩‍🍳 Restauratrice" ou "👤 Employé(e)" -->
-          </div>
-        </div>
-
-        <button class="nav-logout" onclick="logout()" title="Déconnexion">
-        <!-- Bouton de déconnexion qui efface la session et retourne à l'écran d'auth -->
-
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
-          </svg>
-          <!-- Icône SVG de sortie/déconnexion -->
-        </button>
-      </div>
-    </nav>
-
-    <!-- ── Navigation inférieure (mobile) ── -->
-    <div class="bottom-nav" id="bottom-nav">
-    <!-- Barre de navigation en bas d'écran, visible uniquement sur mobile -->
-
-      <button class="bnav-btn active" onclick="showSection('today')" data-section="today">
-      <!-- Bouton "Aujourd'hui" actif par défaut dans la nav mobile -->
-
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
-        </svg>
-        <!-- Icône SVG de maison pour la section "Aujourd'hui" -->
-
-        <span>Aujourd'hui</span>
-        <!-- Libellé du bouton mobile -->
-      </button>
-
-      <button class="bnav-btn" onclick="showSection('messages')" data-section="messages">
-      <!-- Bouton messagerie dans la nav mobile -->
-
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
-        </svg>
-        <!-- Icône bulle de message -->
-
-        <span>Messages</span>
-        <!-- Libellé du bouton mobile -->
-
-        <span class="bnav-badge hidden" id="msg-badge-mob"></span>
-        <!-- Badge numérique de messages non lus (ex: "3"). Caché par défaut -->
-      </button>
-
-      <button class="bnav-btn" onclick="showSection('history')" data-section="history">
-      <!-- Bouton historique dans la nav mobile -->
-
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-        </svg>
-        <!-- Icône horloge -->
-
-        <span>Historique</span>
-        <!-- Libellé du bouton mobile -->
-      </button>
+  <!-- HERO -->
+  <section class="hero">
+    <!-- Fond animé -->
+    <div class="hero-canvas">
+      <div class="hc-orb hc-orb-1"></div>
+      <div class="hc-orb hc-orb-2"></div>
+      <div class="hc-orb hc-orb-3"></div>
+      <div class="hc-grid"></div>
     </div>
 
-    <!-- ══════ SECTION : AUJOURD'HUI ══════ -->
-    <section id="section-today" class="app-section active">
-    <!-- Section principale affichée par défaut après connexion -->
+    <div class="hero-body">
+      <!-- Colonne gauche -->
+      <div class="hero-left">
+        <div class="hero-pill">
+          <span class="hero-pill-dot"></span>
+          <span>Nouveau — Messagerie intégrée disponible</span>
+        </div>
 
-      <div class="page-inner">
-      <!-- Conteneur centré (max-width 900px) avec padding -->
+        <h1 class="hero-h1">
+          Les repas de votre<br/>
+          <span class="hero-h1-grad">entreprise</span><br/>
+          sans effort
+        </h1>
 
-        <!-- ── Carte : Mon repas du jour ── -->
-        <div class="card" id="my-choice-card">
-        <!-- Carte blanche avec ombre affichant le choix personnel de l'utilisateur -->
+        <p class="hero-desc">
+          Collectez les choix de repas de vos employés, gérez
+          les commandes journalières et coordonnez-vous avec
+          la restauratrice — en un seul endroit.
+        </p>
 
-          <div class="card-head">
-          <!-- En-tête de la carte avec titre et badge de statut -->
+        <div class="hero-actions">
+          <button class="btn-hero-main" onclick="goToRegisterEnterprise()">
+            <span>Créer mon compte entreprise</span>
+            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+          </button>
+          <button class="btn-hero-sec" onclick="goToLogin()">
+            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 3a1 1 0 011 1v12a1 1 0 11-2 0V4a1 1 0 011-1zm7.707 3.293a1 1 0 010 1.414L9.414 9H17a1 1 0 110 2H9.414l1.293 1.293a1 1 0 01-1.414 1.414l-3-3a1 1 0 010-1.414l3-3a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+            <span>Déjà inscrit ? Connexion</span>
+          </button>
+        </div>
 
-            <div class="card-title">
-            <!-- Groupe icône + titre -->
+        
+      </div>
 
-              <span class="card-icon">🍴</span>
-              <!-- Icône décorative fourchette/couteau -->
+      
+    </div>
 
-              <h2>Mon repas du jour</h2>
-              <!-- Titre de la carte -->
-            </div>
+    
+  </section>
 
-            <div id="order-badge"></div>
-            <!-- Badge dynamique : "⏳ En attente", "✅ Commande lancée". Rempli par renderMyChoice() -->
-          </div>
+  <!-- FONCTIONNALITÉS -->
+  <section class="features-section" id="features">
+    <div class="fs-inner">
+      <div class="fs-header">
+        <div class="fs-pill">Fonctionnalités</div>
+        <h2 class="fs-title">Tout ce dont vous avez besoin</h2>
+        <p class="fs-sub">Une plateforme complète pour organiser les repas de midi de votre équipe sans friction.</p>
+      </div>
 
-          <div class="card-body">
-          <!-- Corps de la carte -->
+      <div class="features-grid">
 
-            <!-- Affiché quand un choix a été fait -->
-            <div id="my-choice-filled" class="hidden">
-            <!-- Contenu visible uniquement quand l'utilisateur a fait un choix. Masqué par défaut -->
-
-              <div class="my-choice-row">
-              <!-- Ligne avec les infos du choix à gauche et les boutons d'action à droite -->
-
-                <div class="my-choice-info">
-                <!-- Bloc d'informations : emoji du plat + nom + heure du choix -->
-
-                  <span class="big-emoji" id="mc-emoji"></span>
-                  <!-- Grand emoji du plat choisi. Rempli dynamiquement par renderMyChoice() -->
-
-                  <div>
-                    <div class="mc-name" id="mc-name"></div>
-                    <!-- Nom du plat choisi. Rempli par renderMyChoice() -->
-
-                    <div class="mc-time" id="mc-time"></div>
-                    <!-- Heure à laquelle le choix a été effectué. Format "Choisi à HH:MM" -->
-                  </div>
-                </div>
-
-                <div class="mc-actions" id="mc-actions">
-                <!-- Groupe de boutons Modifier / Supprimer. Masqué après expiration du timer ou lancement -->
-
-                  <button class="btn-edit" onclick="openEditModal()">
-                  <!-- Bouton pour ouvrir le modal de modification du choix -->
-
-                    <svg viewBox="0 0 20 20" fill="currentColor">
-                      <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/>
-                    </svg>
-                    <!-- Icône SVG de crayon pour la modification -->
-
-                    Modifier
-                    <!-- Libellé du bouton -->
-                  </button>
-
-                  <button class="btn-del" onclick="deleteMyChoice()">
-                  <!-- Bouton pour supprimer le choix du jour -->
-
-                    <svg viewBox="0 0 20 20" fill="currentColor">
-                      <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/>
-                    </svg>
-                    <!-- Icône SVG de poubelle pour la suppression -->
-
-                    Supprimer
-                    <!-- Libellé du bouton -->
-                  </button>
-                </div>
-              </div>
-
-              <!-- ══ Barre de compte à rebours (3 minutes) ══ -->
-              <div id="mc-timer-wrap" class="mc-timer-wrap"></div>
-              <!-- Conteneur du timer. Le JS y injecte soit la barre animée, soit le message "verrouillé" -->
-            </div>
-
-            <!-- Affiché quand aucun choix n'a encore été fait -->
-            <div id="my-choice-empty">
-            <!-- Visible par défaut (avant tout choix) -->
-
-              <div class="empty-prompt">
-              <!-- Invitation centrée à faire son choix -->
-
-                <div class="empty-prompt-icon">🤔</div>
-                <!-- Emoji pensif pour encourager l'action -->
-
-                <p>Pas encore de choix pour aujourd'hui</p>
-                <!-- Message d'absence de choix -->
-
-                <button class="btn-choose" onclick="openChoiceModal()">Choisir mon repas</button>
-                <!-- Bouton principal orange qui ouvre le modal de sélection du plat -->
-              </div>
-            </div>
+        <div class="feat-card feat-card-big">
+          <div class="feat-card-icon" style="background:linear-gradient(135deg,var(--o1),var(--o2))"></div>
+          <h3>Gestion d'entreprise</h3>
+          <p>Créez votre compte entreprise et gérez les comptes de tous vos employés depuis un tableau de bord central et intuitif.</p>
+          <div class="feat-tags">
+            <span class="feat-tag">Tableau de bord</span>
+            <span class="feat-tag">Multi-employés</span>
+            <span class="feat-tag">Historique</span>
           </div>
         </div>
 
-        <!-- ── Panneau Admin (chargé de commande) ── -->
-        <div id="admin-panel" class="hidden">
-        <!-- Visible uniquement pour les utilisateurs avec le rôle "admin". Masqué par défaut -->
-
-          <div class="admin-card">
-          <!-- Carte à fond sombre (dégradé bleu marine) pour le tableau de bord admin -->
-
-            <div class="admin-card-top">
-            <!-- En-tête du panneau admin avec titre, sous-titre et boutons d'action -->
-
-              <div class="admin-label">
-              <!-- Bloc icône + textes d'information -->
-
-                <span>👨‍💼</span>
-                <!-- Emoji représentant le chargé de commande -->
-
-                <div>
-                  <h3>Tableau de bord — Chargé de commande</h3>
-                  <!-- Titre du panneau admin -->
-
-                  <p id="admin-subtitle">Chargement...</p>
-                  <!-- Sous-titre dynamique : nombre de choix, statut de la commande. Rempli par renderAdminPanel() -->
-                </div>
-              </div>
-
-              <div class="admin-btns">
-              <!-- Groupe de boutons d'action admin -->
-
-                <button class="btn-pdf" onclick="downloadPDF()" title="Télécharger PDF">
-                <!-- Bouton de téléchargement de la liste des commandes en PDF -->
-
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                  </svg>
-                  <!-- Icône SVG de téléchargement de fichier -->
-
-                  PDF
-                  <!-- Libellé court du bouton -->
-                </button>
-
-                <button class="btn-launch" id="launch-btn" onclick="launchOrder()">
-                <!-- Bouton de lancement de la commande. Désactivé si commande déjà lancée ou aucun choix -->
-
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
-                  </svg>
-                  <!-- Icône SVG d'éclair pour symboliser le lancement -->
-
-                  Lancer la commande
-                  <!-- Libellé du bouton -->
-                </button>
-              </div>
-            </div>
-
-            <div class="dish-counts" id="dish-counts"></div>
-            <!-- Conteneur des chips de comptage par plat. Rempli par renderDishCounts() -->
+        <div class="feat-card">
+          <div class="feat-card-icon" style="background:linear-gradient(135deg,var(--s1),var(--s2))">🍴</div>
+          <h3>Choix de repas</h3>
+          <p>9 plats disponibles. Les employés peuvent modifier leur choix pendant 5 minutes après validation.</p>
+          <div class="feat-tags">
+            <span class="feat-tag">9 plats</span>
+            <span class="feat-tag">Temps réel</span>
           </div>
         </div>
 
-        <!-- ── Panneau Restauratrice ── -->
-        <div id="resto-panel" class="hidden">
-        <!-- Visible uniquement pour le rôle "restauratrice". Masqué par défaut -->
-
-          <div class="resto-card">
-          <!-- Carte à bordure bleue pour la vue restauratrice -->
-
-            <div class="resto-card-top">
-            <!-- En-tête avec emoji, titre et badge de statut -->
-
-              <div class="resto-label">
-              <!-- Bloc icône + textes -->
-
-                <span>👩‍🍳</span>
-                <!-- Emoji cuisinière représentant la restauratrice -->
-
-                <div>
-                  <h3>Vue restauratrice</h3>
-                  <!-- Titre du panneau restauratrice -->
-
-                  <p id="resto-subtitle">Commandes du jour</p>
-                  <!-- Sous-titre dynamique avec le nombre et statut des commandes -->
-                </div>
-              </div>
-
-              <div id="resto-status-badge"></div>
-              <!-- Badge de statut de la commande pour la restauratrice. Rempli par renderRestoPanel() -->
-            </div>
-
-            <div class="dish-counts" id="dish-counts-resto"></div>
-            <!-- Comptage des plats pour la restauratrice. Rempli par renderDishCounts() -->
+        <div class="feat-card">
+          <div class="feat-card-icon" style="background:linear-gradient(135deg,#8B5CF6,#A78BFA)">💬</div>
+          <h3>Messagerie intégrée</h3>
+          <p>Échangez directement avec la restauratrice depuis l'application. Notifications en temps réel.</p>
+          <div class="feat-tags">
+            <span class="feat-tag">Chat direct</span>
+            <span class="feat-tag">Notifications</span>
           </div>
         </div>
 
-        <!-- ── Grille des choix de l'équipe ── -->
-        <div class="card">
-        <!-- Carte affichant les choix de tous les employés -->
-
-          <div class="card-head">
-            <div class="card-title">
-              <span class="card-icon">👥</span>
-              <!-- Icône groupe de personnes -->
-
-              <h2>Repas de l'équipe</h2>
-              <!-- Titre de la section -->
-            </div>
-
-            <span class="pill-count" id="team-count">0</span>
-            <!-- Badge orange affichant le nombre total de choix effectués -->
+        <div class="feat-card">
+          <div class="feat-card-icon" style="background:linear-gradient(135deg,#22C55E,#16A34A)">📄</div>
+          <h3>Export PDF</h3>
+          <p>Téléchargez la liste complète des commandes en PDF formaté pour la transmettre à la restauratrice.</p>
+          <div class="feat-tags">
+            <span class="feat-tag">PDF formaté</span>
+            <span class="feat-tag">Un clic</span>
           </div>
+        </div>
 
-          <div class="card-body">
-            <div class="choices-grid" id="choices-grid">
-            <!-- Grille CSS auto-fill affichant une carte par employé ayant fait son choix -->
-
-              <div class="skeleton-state">Chargement...</div>
-              <!-- Texte de chargement affiché avant le premier rendu de la grille -->
-            </div>
+        <div class="feat-card feat-card-big feat-card-dark">
+          <div class="feat-card-icon feat-icon-white">⏱️</div>
+          <h3>Verrouillage intelligent</h3>
+          <p>Chaque choix peut être modifié ou supprimé dans les 5 minutes suivant la saisie. Passé ce délai, le choix est définitivement enregistré pour garantir l'organisation des commandes.</p>
+          <div class="feat-tags">
+            <span class="feat-tag feat-tag-white">Délai de 5 min</span>
+            <span class="feat-tag feat-tag-white">Sécurisé</span>
+            <span class="feat-tag feat-tag-white">Automatique</span>
           </div>
         </div>
 
       </div>
-    </section>
+    </div>
+  </section>
 
-    <!-- ══════ SECTION : HISTORIQUE ══════ -->
-    <section id="section-history" class="app-section">
-    <!-- Section historique des repas de l'utilisateur. Masquée par défaut -->
+  <!-- COMMENT ÇA MARCHE -->
+  <section class="how-section" id="how">
+    <div class="how-inner">
+      <div class="fs-header">
+        <div class="fs-pill">Processus</div>
+        <h2 class="fs-title">Comment ça marche ?</h2>
+        <p class="fs-sub">Démarrez en 3 étapes simples et organisez vos repas dès aujourd'hui.</p>
+      </div>
 
-      <div class="page-inner">
-        <div class="card">
-          <div class="card-head">
-            <div class="card-title">
-              <span class="card-icon">🕐</span>
-              <!-- Icône horloge pour l'historique -->
+      <div class="steps-grid">
+        <div class="step-card">
+          <div class="step-num">01</div>
+          <div class="step-icon"></div>
+          <h3>L'entreprise crée son compte</h3>
+          <p>Inscrivez votre entreprise en quelques secondes, puis créez les comptes de vos employés avec nom et mot de passe.</p>
+        </div>
+        <div class="step-arrow">→</div>
+        <div class="step-card">
+          <div class="step-num">02</div>
+          <div class="step-icon"></div>
+          <h3>Les employés choisissent</h3>
+          <p>Chaque jour, les employés se connectent et choisissent leur repas parmi les 9 plats disponibles.</p>
+        </div>
+        <div class="step-arrow">→</div>
+        <div class="step-card">
+          <div class="step-num">03</div>
+          <div class="step-icon"></div>
+          <h3>La commande est lancée</h3>
+          <p>Le chargé de commande valide, télécharge le PDF et transmet à la restauratrice. Simple et efficace.</p>
+        </div>
+      </div>
+    </div>
+  </section>
 
-              <h2>Mon historique de repas</h2>
-              <!-- Titre de la section historique -->
-            </div>
+  <!-- CTA FINAL -->
+  <section class="cta-section">
+    <div class="cta-bg">
+      <div class="cta-orb-1"></div>
+      <div class="cta-orb-2"></div>
+    </div>
+    <div class="cta-inner">
+      <h2 class="cta-title">Prêt à simplifier vos repas ?</h2>
+      <p class="cta-sub">Créez votre compte entreprise gratuitement et commencez dès aujourd'hui.</p>
+      <div class="cta-actions">
+        <button class="btn-cta-big" onclick="goToRegisterEnterprise()">
+           Créer mon compte entreprise
+        </button>
+        <button class="btn-cta-ghost" onclick="goToLogin()">
+          Se connecter →
+        </button>
+      </div>
+    </div>
+  </section>
 
-            <button class="btn-back" onclick="showSection('today')">← Retour</button>
-            <!-- Bouton retour vers la section "Aujourd'hui" -->
+  <!-- FOOTER -->
+  <footer class="land-footer">
+    <div class="lf-inner">
+      <div class="lf-brand">
+        <span>🍽️</span>
+        <span class="lf-name">LunchApp</span>
+      </div>
+      <p class="lf-copy">© 2026 LunchApp — Votre repas du midi, organisé ensemble.</p>
+      <div class="lf-links">
+        <button onclick="goToLogin()" class="lf-link">Connexion</button>
+        <button onclick="goToRegisterEnterprise()" class="lf-link">Inscription</button>
+      </div>
+    </div>
+  </footer>
+
+</div>
+<!-- fin landing-screen -->
+
+<!--ÉCRAN 2 — AUTHENTIFICATION-->
+<div id="auth-screen" class="screen">
+  <div class="auth-bg-deco">
+    <div class="abd-blob ab1"></div>
+    <div class="abd-blob ab2"></div>
+  </div>
+
+  <div class="auth-wrapper">
+    <button class="auth-back-btn" onclick="showScreen('landing-screen')">
+      ← Retour à l'accueil
+    </button>
+
+    <!-- CONNEXION -->
+    <div id="panel-login" class="auth-panel">
+      <div class="auth-panel-header">
+        <div class="auth-panel-logo">🍽️</div>
+        <h2>Connexion</h2>
+        <p>Accédez à votre espace LunchApp</p>
+      </div>
+
+      <div class="login-type-selector">
+        <button class="lts-btn active" data-type="employee" onclick="setLoginType('employee', this)"> Employé</button>
+        <button class="lts-btn" data-type="enterprise" onclick="setLoginType('enterprise', this)"> Entreprise</button>
+        <button class="lts-btn" data-type="restauratrice" onclick="setLoginType('restauratrice', this)"> Resto.</button>
+        <button class="lts-btn" data-type="superadmin" onclick="setLoginType('superadmin', this)"> Admin</button>
+      </div>
+
+      <div class="login-type-hint" id="login-type-hint">
+        Connectez-vous avec votre nom et mot de passe
+      </div>
+
+      <form id="login-form" onsubmit="handleLogin(event)">
+        <div class="field">
+          <label id="login-identifier-label">Votre nom complet</label>
+          <div class="field-wrap">
+            <svg class="f-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/></svg>
+            <input type="text" id="login-identifier" placeholder="Prénom Nom ou Nom Prénom" autocomplete="off" />
           </div>
+        </div>
+        <div class="field">
+          <label>Mot de passe</label>
+          <div class="field-wrap">
+            <svg class="f-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
+            <input type="password" id="login-password" placeholder="••••••••" />
+            <button type="button" class="eye-btn" onclick="togglePwd('login-password',this)">
+              <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/><path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/></svg>
+            </button>
+          </div>
+        </div>
+        <div id="login-error" class="form-error hidden"></div>
+        <button type="submit" class="btn-submit">
+          Se connecter
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+        </button>
+      </form>
 
-          <div class="card-body">
-            <div id="history-list" class="history-list">
-            <!-- Conteneur de la liste d'historique. Rempli dynamiquement par loadHistory() -->
+      <div class="auth-switch-link">
+        Pas encore de compte ?
+        <button onclick="showAuthPanel('panel-register-enterprise')">Créer un compte entreprise</button>
+      </div>
+      <div class="auth-switch-link" style="margin-top:4px">
+        Restauratrice ?
+        <button onclick="showAuthPanel('panel-register-restauratrice')">Créer votre compte</button>
+      </div>
+    </div>
 
-              <div class="skeleton-state">Chargement...</div>
-              <!-- Texte de chargement initial -->
+    <!-- INSCRIPTION ENTREPRISE -->
+    <div id="panel-register-enterprise" class="auth-panel hidden">
+      <div class="auth-panel-header">
+        <div class="auth-panel-logo"></div>
+        <h2>Compte Entreprise</h2>
+        <p>Créez votre espace de gestion des repas</p>
+      </div>
+
+      <form id="register-enterprise-form" onsubmit="handleRegisterEnterprise(event)">
+        <div class="field">
+          <label>Nom de l'entreprise</label>
+          <div class="field-wrap">
+            <svg class="f-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h8a2 2 0 012 2v12a1 1 0 110 2h-3a1 1 0 01-1-1v-2a1 1 0 00-1-1H9a1 1 0 00-1 1v2a1 1 0 01-1 1H4a1 1 0 110-2V4zm3 1h2v2H7V5zm2 4H7v2h2V9zm2-4h2v2h-2V5zm2 4h-2v2h2V9z" clip-rule="evenodd"/></svg>
+            <input type="text" id="ent-name" placeholder="Ex: Tech Solutions SARL" required />
+          </div>
+        </div>
+        <div class="field">
+          <label>Domaine / Spécialité</label>
+          <div class="field-wrap">
+            <svg class="f-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M9 4.804A7.968 7.968 0 005.5 4c-1.255 0-2.443.29-3.5.804v10A7.969 7.969 0 015.5 14c1.669 0 3.218.51 4.5 1.385A7.962 7.962 0 0114.5 14c1.255 0 2.443.29 3.5.804v-10A7.968 7.968 0 0014.5 4c-1.255 0-2.443.29-3.5.804V12a1 1 0 11-2 0V4.804z"/></svg>
+            <input type="text" id="ent-domain" placeholder="Ex: Informatique, BTP, Finance..." required />
+          </div>
+        </div>
+        <div class="field">
+          <label>Mot de passe</label>
+          <div class="field-wrap">
+            <svg class="f-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
+            <input type="password" id="ent-password" placeholder="8 car. min, maj, min, chiffre, spécial" oninput="checkPwdStrength(this.value)" required minlength="8" />
+            <button type="button" class="eye-btn" onclick="togglePwd('ent-password',this)">
+              <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/><path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/></svg>
+            </button>
+          </div>
+          <div id="pwd-strength-bar" class="pwd-strength-wrap hidden">
+            <div class="pwd-strength-track"><div class="pwd-strength-fill" id="pwd-strength-fill"></div></div>
+            <span class="pwd-strength-label" id="pwd-strength-label"></span>
+          </div>
+          <div class="pwd-rules" id="pwd-rules">
+            
+          </div>
+        </div>
+        <div id="register-ent-error" class="form-error hidden"></div>
+        <button type="submit" class="btn-submit">
+          Créer mon compte entreprise
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+        </button>
+      </form>
+      <div class="auth-switch-link">
+        Déjà un compte ? <button onclick="showAuthPanel('panel-login')">Se connecter</button>
+      </div>
+    </div>
+
+    <!-- INSCRIPTION RESTAURATRICE -->
+    <div id="panel-register-restauratrice" class="auth-panel hidden">
+      <div class="auth-panel-header">
+        <div class="auth-panel-logo">👩‍🍳</div>
+        <h2>Compte Restauratrice</h2>
+        <p>Gérez et suivez les commandes des entreprises</p>
+      </div>
+
+      <form id="register-resto-form" onsubmit="handleRegisterRestauratrice(event)">
+        <div class="field">
+          <label>Votre nom complet</label>
+          <div class="field-wrap">
+            <svg class="f-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/></svg>
+            <input type="text" id="resto-name" placeholder="Prénom Nom" required />
+          </div>
+        </div>
+        <div class="field">
+          <label>Mot de passe (6 caractères minimum)</label>
+          <div class="field-wrap">
+            <svg class="f-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
+            <input type="password" id="resto-password" placeholder="Minimum 6 caractères" required minlength="6" />
+            <button type="button" class="eye-btn" onclick="togglePwd('resto-password',this)">
+              <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/><path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/></svg>
+            </button>
+          </div>
+        </div>
+        <div id="register-resto-error" class="form-error hidden"></div>
+        <button type="submit" class="btn-submit">
+          Créer mon compte
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+        </button>
+      </form>
+      <div class="auth-switch-link">
+        <button onclick="showAuthPanel('panel-login')">← Retour à la connexion</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+<!-- fin auth-screen -->
+
+<!--ÉCRAN 3 — APPLICATION-->
+<div id="app-screen" class="screen">
+
+  <nav class="topnav">
+    <div class="nav-brand">
+      <span class="nav-logo">🍽️</span>
+      <span class="nav-title">LunchApp</span>
+    </div>
+    <div class="nav-center">
+      <div class="nav-date" id="nav-date"></div>
+    </div>
+    <div class="nav-end">
+      <button class="nav-icon-btn hidden" id="nav-msg-btn" onclick="showSection('messages')" title="Messagerie">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+        <span class="notif-dot hidden" id="msg-notif-dot"></span>
+      </button>
+      <button class="nav-icon-btn hidden" id="nav-history-btn" onclick="showSection('history')" title="Historique">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      </button>
+      <div class="nav-user">
+        <div class="nav-avatar" id="nav-avatar"></div>
+        <div class="nav-user-info">
+          <span id="nav-user-name"></span>
+          <span class="nav-role-badge" id="nav-role-badge"></span>
+        </div>
+      </div>
+      <button class="nav-logout" onclick="logout()" title="Déconnexion">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+        <span class="nav-logout-label">Déconnexion</span>
+      </button>
+    </div>
+  </nav>
+
+  <div class="bottom-nav" id="bottom-nav"></div>
+
+  <!-- SECTION AUJOURD'HUI -->
+  <section id="section-today" class="app-section active">
+    <div class="page-inner">
+      <div class="card" id="card-my-choice">
+        <div class="card-head">
+          <div class="card-title"><span class="card-icon">🍴</span><h2>Mon repas du jour</h2></div>
+          <div id="order-badge"></div>
+        </div>
+        <div class="card-body">
+          <div id="my-choice-filled" class="hidden">
+            <div class="my-choice-row">
+              <div class="my-choice-info">
+                <span class="big-emoji" id="mc-emoji"></span>
+                <div>
+                  <div class="mc-name" id="mc-name"></div>
+                  <div class="mc-time" id="mc-time"></div>
+                </div>
+              </div>
+              <div class="mc-actions" id="mc-actions">
+                <button class="btn-edit" onclick="openEditModal()">
+                  <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
+                  Modifier
+                </button>
+                <button class="btn-del" onclick="deleteMyChoice()">
+                  <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+                  Supprimer
+                </button>
+              </div>
+            </div>
+            <div id="mc-timer-wrap" class="mc-timer-wrap"></div>
+          </div>
+          <div id="my-choice-empty">
+            <div class="empty-prompt">
+              <div class="empty-prompt-icon">🤔</div>
+              <p>Pas encore de choix pour aujourd'hui</p>
+              <button class="btn-choose" onclick="openChoiceModal()">Choisir mon repas</button>
             </div>
           </div>
         </div>
       </div>
-    </section>
 
-    <!-- ══════ SECTION : MESSAGERIE ══════ -->
-    <section id="section-messages" class="app-section">
-    <!-- Section de messagerie entre admin et restauratrice. Masquée par défaut -->
-
-      <div class="page-inner">
-        <div class="card chat-card">
-        <!-- Carte de chat : hauteur calculée pour occuper tout l'écran disponible -->
-
-          <div class="card-head">
-            <div class="card-title">
-              <span class="card-icon">💬</span>
-              <!-- Icône bulle de discussion -->
-
-              <h2>Messagerie</h2>
-              <!-- Titre de la section messagerie -->
+      <div id="enterprise-panel" class="hidden">
+        <div class="admin-card">
+          <div class="admin-card-top">
+            <div class="admin-label">
+              <span></span>
+              <div>
+                <h3 id="enterprise-panel-title">Tableau de bord</h3>
+                <p id="enterprise-subtitle">Chargement...</p>
+              </div>
             </div>
-
-            <div class="chat-participants">
-            <!-- Indicateur visuel des deux participants au chat -->
-
-              <span class="chat-part admin-part">👨‍💼 Chargé de commande</span>
-              <!-- Chip représentant le chargé de commande -->
-
-              <span class="chat-arrow">⇄</span>
-              <!-- Flèche bidirectionnelle indiquant l'échange -->
-
-              <span class="chat-part resto-part">👩‍🍳 Restauratrice</span>
-              <!-- Chip représentant la restauratrice -->
-            </div>
-
-            <button class="btn-back" onclick="showSection('today')">← Retour</button>
-            <!-- Bouton retour vers la section principale -->
-          </div>
-
-          <div id="chat-access-denied" class="hidden">
-          <!-- Message d'accès refusé affiché aux employés simples qui ne peuvent pas accéder au chat -->
-
-            <div class="chat-locked">
-              <div class="locked-icon">🔒</div>
-              <!-- Icône cadenas pour indiquer l'accès restreint -->
-
-              <p>La messagerie est réservée au chargé de commande et à la restauratrice.</p>
-              <!-- Message explicatif pour les utilisateurs sans accès -->
-            </div>
-          </div>
-
-          <div id="chat-wrapper" class="hidden">
-          <!-- Conteneur principal du chat. Visible uniquement pour admin et restauratrice -->
-
-            <div class="chat-messages" id="chat-messages">
-            <!-- Zone de défilement affichant les bulles de messages -->
-
-              <div class="skeleton-state">Chargement des messages...</div>
-              <!-- Texte affiché pendant le chargement des messages -->
-            </div>
-
-            <div class="chat-composer">
-            <!-- Zone de saisie et d'envoi des messages, collée en bas de la carte -->
-
-              <textarea id="chat-input" placeholder="Écrire un message..." rows="1" onkeydown="chatKeydown(event)"></textarea>
-              <!-- Zone de texte multiligne. rows="1" pour démarrer petit (s'agrandit automatiquement via JS) -->
-              <!-- onkeydown gère l'envoi avec Entrée et le redimensionnement automatique -->
-
-              <button class="chat-send-btn" onclick="sendMessage()">
-              <!-- Bouton d'envoi du message -->
-
-                <svg viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-                </svg>
-                <!-- Icône SVG d'avion en papier / envoi -->
+            <div class="admin-btns">
+              <button class="btn-pdf" onclick="downloadPDF()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                PDF
+              </button>
+              <button class="btn-launch" id="launch-btn" onclick="launchOrder()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                Lancer la commande
               </button>
             </div>
           </div>
+          <div class="dish-counts" id="dish-counts"></div>
         </div>
       </div>
-    </section>
 
-  </div>
-
-  <!-- ══════════════════ MODAL DE SÉLECTION DU PLAT ══════════════════ -->
-  <!-- Superposition plein écran avec le formulaire de choix du repas -->
-  <div id="food-modal" class="modal-backdrop hidden" onclick="backdropClose(event)">
-  <!-- Fond semi-transparent. onclick sur le fond (pas la carte) ferme le modal via backdropClose() -->
-
-    <div class="modal">
-    <!-- Carte blanche centrale contenant le formulaire de sélection -->
-
-      <div class="modal-top">
-      <!-- En-tête du modal avec titre, sous-titre et bouton de fermeture -->
-
-        <div>
-          <h3 id="modal-title">Choisir mon repas</h3>
-          <!-- Titre du modal : "Choisir mon repas" ou "Modifier mon repas" selon le contexte -->
-
-          <p class="modal-sub">Que souhaitez-vous manger aujourd'hui ?</p>
-          <!-- Sous-titre de guidage -->
+      <div id="resto-panel" class="hidden">
+        <div class="resto-card">
+          <div class="resto-card-top">
+            <div class="resto-label">
+              <span></span>
+              <div>
+                <h3>Vue restauratrice</h3>
+                <p id="resto-subtitle">Commandes du jour</p>
+              </div>
+            </div>
+            <div id="resto-status-badge"></div>
+          </div>
+          <div class="dish-counts" id="dish-counts-resto"></div>
         </div>
-
-        <button class="modal-x" onclick="closeFoodModal()">
-        <!-- Bouton de fermeture en haut à droite du modal (croix ×) -->
-
-          <svg viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
-          </svg>
-          <!-- Icône SVG de croix (×) pour fermer le modal -->
-        </button>
       </div>
 
-      <div class="modal-body">
-      <!-- Corps du modal : grille des plats + champ personnalisé + erreur + bouton -->
-
-        <div class="food-grid" id="food-grid"></div>
-        <!-- Grille de 2 colonnes affichant les options de plats. Remplie par buildFoodGrid() au démarrage -->
-
-        <div id="custom-field" class="custom-field hidden">
-        <!-- Champ texte libre affiché uniquement quand "Autres" est sélectionné -->
-
-          <label>Précisez votre plat :</label>
-          <!-- Étiquette du champ personnalisé -->
-
-          <input type="text" id="custom-input" placeholder="Ex: Haricots verts sauce tomate..." maxlength="100" />
-          <!-- Champ libre pour décrire le plat. maxlength limite à 100 caractères -->
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span class="card-icon">👥</span><h2>Repas de l'équipe</h2></div>
+          <span class="pill-count" id="team-count">0 choix</span>
         </div>
-
-        <div id="modal-error" class="form-error hidden"></div>
-        <!-- Zone d'erreur du modal. Affichée si aucun plat n'est sélectionné ou si le custom est vide -->
-
-        <button class="btn-submit" onclick="submitChoice()">
-        <!-- Bouton de confirmation du choix de repas -->
-
-          Confirmer mon choix
-          <!-- Libellé du bouton -->
-
-          <svg viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
-          </svg>
-          <!-- Icône coche de validation -->
-        </button>
+        <div class="card-body">
+          <div class="choices-grid" id="choices-grid">
+            <div class="skeleton-state">Chargement...</div>
+          </div>
+        </div>
       </div>
     </div>
+  </section>
+
+  <!-- SECTION EMPLOYÉS -->
+  <section id="section-employees" class="app-section">
+    <div class="page-inner">
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span class="card-icon">👥</span><h2>Gestion des employés</h2></div>
+          <button class="btn-add-employee" onclick="openAddEmployeeModal()">+ Ajouter un employé</button>
+        </div>
+        <div class="card-body">
+          <div id="employees-list" class="employees-list"><div class="skeleton-state">Chargement...</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION HISTORIQUE -->
+  <section id="section-history" class="app-section">
+    <div class="page-inner">
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span class="card-icon">🕐</span><h2>Mon historique</h2></div>
+          <button class="btn-back" onclick="showSection('today')">← Retour</button>
+        </div>
+        <div class="card-body">
+          <div id="history-list" class="history-list"><div class="skeleton-state">Chargement...</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION MESSAGERIE -->
+  <section id="section-messages" class="app-section">
+    <div class="page-inner">
+      <div class="card chat-card">
+        <div class="card-head">
+          <div class="card-title"><span class="card-icon"></span><h2>Messagerie</h2></div>
+          <div class="chat-participants">
+            <span class="chat-part admin-part"> Entreprise</span>
+            <span class="chat-arrow">⇄</span>
+            <span class="chat-part resto-part"> Restauratrice</span>
+          </div>
+          <button class="btn-back" onclick="showSection('today')">← Retour</button>
+        </div>
+        <div id="chat-wrapper">
+          <div class="chat-messages" id="chat-messages"><div class="skeleton-state">Chargement...</div></div>
+          <div class="chat-composer">
+            <textarea id="chat-input" placeholder="Écrire un message..." rows="1" onkeydown="chatKeydown(event)"></textarea>
+            <button class="chat-send-btn" onclick="sendMessage()">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION ADMIN -->
+  <section id="section-admin" class="app-section">
+    <div class="page-inner">
+      <div class="admin-stats-grid" id="admin-stats-grid"></div>
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span class="card-icon"></span><h2>Entreprises inscrites</h2></div>
+          <span class="pill-count" id="admin-ent-count">0</span>
+        </div>
+        <div class="card-body">
+          <div id="admin-enterprises-list" class="admin-list"><div class="skeleton-state">Chargement...</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span class="card-icon">🍽️</span><h2>Commandes du jour</h2></div>
+          <span class="pill-count" id="admin-choices-count">0</span>
+        </div>
+        <div class="card-body">
+          <div id="admin-choices-list" class="choices-grid"><div class="skeleton-state">Chargement...</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span class="card-icon">📋</span><h2>Historique global</h2></div>
+        </div>
+        <div class="card-body">
+          <div id="admin-history-list" class="history-list"><div class="skeleton-state">Chargement...</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+<!-- fin app-screen -->
+
+<!-- MODAL REPAS -->
+<div id="food-modal" class="modal-backdrop hidden" onclick="backdropClose(event,'food-modal')">
+  <div class="modal">
+    <div class="modal-top">
+      <div>
+        <h3 id="modal-title">Choisir mon repas</h3>
+        <p class="modal-sub">Que souhaitez-vous manger aujourd'hui ?</p>
+      </div>
+      <button class="modal-x" onclick="closeFoodModal()">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="food-grid" id="food-grid"></div>
+      <div id="custom-field" class="custom-field hidden">
+        <label>Précisez votre plat :</label>
+        <input type="text" id="custom-input" placeholder="Ex: Haricots verts sauce tomate..." maxlength="100" />
+      </div>
+      <div id="modal-error" class="form-error hidden"></div>
+      <button class="btn-submit" onclick="submitChoice()">
+        Confirmer mon choix
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+      </button>
+    </div>
   </div>
+</div>
 
-  <!-- ══════════════════ TOAST DE NOTIFICATION ══════════════════ -->
-  <div id="toast" class="toast"></div>
-  <!-- Notification flottante en bas de page. Le JS y injecte le message et les classes de style -->
+<!-- MODAL EMPLOYÉ -->
+<div id="employee-modal" class="modal-backdrop hidden" onclick="backdropClose(event,'employee-modal')">
+  <div class="modal">
+    <div class="modal-top">
+      <div>
+        <h3>Ajouter un employé</h3>
+        <p class="modal-sub">Créez un compte pour votre employé</p>
+      </div>
+      <button class="modal-x" onclick="closeEmployeeModal()">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label>Nom complet de l'employé</label>
+        <div class="field-wrap">
+          <svg class="f-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/></svg>
+          <input type="text" id="emp-name" placeholder="Prénom Nom" />
+        </div>
+      </div>
+      <div class="field">
+        <label>Mot de passe (6 caractères minimum)</label>
+        <div class="field-wrap">
+          <svg class="f-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
+          <input type="password" id="emp-password" placeholder="Minimum 6 caractères" minlength="6" />
+          <button type="button" class="eye-btn" onclick="togglePwd('emp-password',this)">
+            <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/><path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/></svg>
+          </button>
+        </div>
+      </div>
+      <div id="emp-modal-error" class="form-error hidden"></div>
+      <button class="btn-submit" onclick="submitAddEmployee()">
+        Créer le compte employé
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
 
-  <script src="app.js"></script>
-  <!-- Chargement du script principal en fin de body (le DOM est déjà chargé) -->
+<div id="toast" class="toast"></div>
+<script src="app.js"></script>
 
+<script>
+  /* Menu mobile toggle */
+  function toggleMenu() {
+    const m = document.getElementById('mobile-menu');
+    m.classList.toggle('hidden');
+  }
+  /* Ferme le menu mobile en scrollant */
+  document.querySelectorAll('.mob-link').forEach(l => {
+    l.addEventListener('click', () => {
+      document.getElementById('mobile-menu').classList.add('hidden');
+    });
+  });
+</script>
 </body>
 </html>

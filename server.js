@@ -1,510 +1,660 @@
+const express = require('express');      // Framework HTTP Node.js
+const bcrypt  = require('bcryptjs');     // Hashage sécurisé des mots de passe
+const jwt     = require('jsonwebtoken'); // Tokens d'authentification JWT
+const cors    = require('cors');         // Autorise les requêtes cross-origin
+const fs      = require('fs');           // Lecture/écriture de fichiers
+const path    = require('path');         // Construction de chemins de fichiers
 
-// Importation du framework Express pour créer le serveur HTTP
-const express = require('express');
+const app        = express();
+const PORT       = process.env.PORT       || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || 'lunchapp_2024_key';
+const LOCK_MS    = 5 * 60 * 1000;        // 5 minutes en millisecondes
 
-// Importation de bcryptjs pour hasher et comparer les mots de passe
-const bcrypt = require('bcryptjs');
-
-// Importation de jsonwebtoken pour créer et vérifier les tokens JWT
-const jwt = require('jsonwebtoken');
-
-// Importation de cors pour autoriser les requêtes cross-origin
-const cors = require('cors');
-
-// Importation du module natif Node.js pour lire/écrire des fichiers
-const fs = require('fs');
-
-// Importation du module natif Node.js pour construire des chemins de fichiers
-const path = require('path');
-
-// Création de l'instance principale de l'application Express
-const app = express();
-
-// Définition du port d'écoute : utilise la variable d'environnement PORT ou 3000 par défaut
-const PORT = process.env.PORT || 3000;
-
-// Clé secrète pour signer les tokens JWT (à changer en production)
-const JWT_SECRET = process.env.JWT_SECRET || 'lunchapp_secret_key_2024';
-
-// ── Constante de verrouillage des choix ──────────────────────────────────────
-
-// Durée maximale (en millisecondes) pendant laquelle un employé peut modifier/supprimer son choix
-const LOCK_MS = 3 * 60 * 1000; // 3 minutes × 60 secondes × 1000 ms = 180 000 ms
-
-// ── Middlewares globaux ───────────────────────────────────────────────────────
-
-// Active CORS : permet aux clients (navigateurs) d'accéder à l'API depuis n'importe quelle origine
-app.use(cors());
-
-// Active le parsing automatique du corps des requêtes en JSON
-app.use(express.json());
-
-// Sert les fichiers statiques (HTML, CSS, JS) depuis le dossier "public"
-app.use(express.static(path.join(__dirname, 'public')));
-
-// ── Stockage des données (fichiers JSON) ──────────────────────────────────────
-
-// Construit le chemin absolu vers le dossier "data" qui stocke les fichiers JSON
-const DB_DIR = path.join(__dirname, 'data');
-
-// Crée le dossier "data" s'il n'existe pas encore (au premier lancement)
-if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR);
-
-// Objet centralisant les chemins vers chaque fichier de données
-const FILES = {
-  // Fichier stockant tous les utilisateurs enregistrés
-  users:    path.join(DB_DIR, 'users.json'),
-  // Fichier stockant tous les choix de repas
-  choices:  path.join(DB_DIR, 'choices.json'),
-  // Fichier stockant tous les messages de la messagerie
-  messages: path.join(DB_DIR, 'messages.json'),
+// ── Compte superadmin hardcodé ────────────────────────────────────────────────
+// CORRECTION : "text" et non "test" dans l'email
+const SUPERADMIN = {
+  id:       'superadmin-001',
+  email:    'admin.text.elimmeka@gmail.com', // ← CORRIGÉ (text, pas test)
+  password: '@admin2101',                    // Mot de passe en clair (hardcodé volontairement)
+  fullName: 'Super Administrateur',
+  role:     'superadmin',
 };
 
-// Fonction utilitaire pour lire un fichier JSON et retourner son contenu
+// ── Stockage JSON ─────────────────────────────────────────────────────────────
+const DB_DIR = path.join(__dirname, 'data');
+if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR); // Crée le dossier si absent
+
+const FILES = {
+  enterprises:    path.join(DB_DIR, 'enterprises.json'),
+  employees:      path.join(DB_DIR, 'employees.json'),
+  restauratrices: path.join(DB_DIR, 'restauratrices.json'),
+  choices:        path.join(DB_DIR, 'choices.json'),
+  messages:       path.join(DB_DIR, 'messages.json'),
+};
+
+// Lit un fichier JSON → retourne [] si absent ou invalide
 function readDB(file) {
-  // Si le fichier n'existe pas encore, retourne un tableau vide
   if (!fs.existsSync(file)) return [];
-  // Tente de lire et parser le fichier JSON ; en cas d'erreur retourne un tableau vide
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return []; }
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
+  catch { return []; }
 }
 
-// Fonction utilitaire pour écrire des données dans un fichier JSON
+// Écrit les données dans un fichier JSON indenté
 function writeDB(file, data) {
-  // Sérialise les données en JSON formaté (indentation de 2 espaces) et écrit dans le fichier
   fs.writeFileSync(file, JSON.stringify(data, null, 2));
 }
 
+// ── Middlewares ───────────────────────────────────────────────────────────────
+app.use(cors());                                            // CORS toutes origines
+app.use(express.json());                                    // Parse le corps JSON
+app.use(express.static(path.join(__dirname, 'public')));   // Sert les fichiers statiques
+
 // ── Middleware d'authentification JWT ─────────────────────────────────────────
-
-// Middleware vérifiant que la requête contient un token JWT valide
 function auth(req, res, next) {
-  // Récupère l'en-tête Authorization de la requête
   const header = req.headers.authorization;
-
-  // Si l'en-tête est absent ou ne commence pas par "Bearer ", refuse l'accès
-  if (!header?.startsWith('Bearer ')) return res.status(401).json({ error: 'Non autorisé' });
-
-  // Tente de vérifier et décoder le token JWT
+  if (!header?.startsWith('Bearer '))
+    return res.status(401).json({ error: 'Non autorisé' });
   try {
-    // Décode le token (en retirant "Bearer ") et attache les données décodées à req.user
-    req.user = jwt.verify(header.slice(7), JWT_SECRET);
-    // Passe au middleware ou à la route suivante
+    req.user = jwt.verify(header.slice(7), JWT_SECRET); // Décode le token
     next();
-  }
-  // Si la vérification échoue (token expiré, invalide, etc.)
-  catch {
-    // Retourne une erreur 401 avec un message explicite
-    res.status(401).json({ error: 'Token invalide' });
+  } catch {
+    res.status(401).json({ error: 'Token invalide ou expiré' });
   }
 }
 
-// ── Routes d'authentification ─────────────────────────────────────────────────
+// ── Validation du mot de passe entreprise ─────────────────────────────────────
+// Règles : 8+ car., 1 maj., 1 min., 1 chiffre, 1 caractère spécial
+function validateEnterprisePwd(pwd) {
+  if (!pwd || pwd.length < 8)
+    return 'Minimum 8 caractères requis';
+  if (!/[A-Z]/.test(pwd))
+    return 'Au moins une lettre majuscule (A-Z) requise';
+  if (!/[a-z]/.test(pwd))
+    return 'Au moins une lettre minuscule (a-z) requise';
+  if (!/[0-9]/.test(pwd))
+    return 'Au moins un chiffre (0-9) requis';
+  if (!/[!@#$%^&*()\-_=+\[\]{};:'",.<>?/\\|`~]/.test(pwd))
+    return 'Au moins un caractère spécial requis (!@#$... etc.)';
+  return null; // null = valide
+}
 
-// Route POST pour l'inscription d'un nouvel utilisateur
-app.post('/api/register', async (req, res) => {
-  // Destructure les champs envoyés dans le corps de la requête
-  const { fullName, phone, email, password, role: requestedRole } = req.body;
+// ── Génère les variantes Prénom Nom / Nom Prénom ──────────────────────────────
+// Permet la connexion dans les deux sens pour les employés et restauratrices
+function nameVariants(inputName) {
+  const normalized = inputName.trim().toLowerCase();
+  const parts      = normalized.split(/\s+/).filter(Boolean);
+  if (parts.length === 2) {
+    return [parts.join(' '), `${parts[1]} ${parts[0]}`]; // ["jean dupont", "dupont jean"]
+  }
+  return [normalized]; // 1 ou 3+ mots : retourne tel quel
+}
 
-  // Vérifie que tous les champs obligatoires sont présents
-  if (!fullName || !phone || !email || !password)
-    // Retourne une erreur 400 (mauvaise requête) si un champ manque
-    return res.status(400).json({ error: 'Tous les champs sont obligatoires' });
-
-  // Charge la liste des utilisateurs existants depuis le fichier JSON
-  const users = readDB(FILES.users);
-
-  // Vérifie si un utilisateur avec cet email existe déjà (comparaison en minuscules)
-  if (users.find(u => u.email === email.toLowerCase()))
-    // Retourne une erreur 409 (conflit) si l'email est déjà utilisé
-    return res.status(409).json({ error: 'Email déjà utilisé' });
-
-  // Hashe le mot de passe avec bcrypt (facteur de coût = 10)
-  const hashedPwd = await bcrypt.hash(password, 10);
-
-  // Détermine le rôle : si "restauratrice" demandé, on l'attribue ; sinon "user" par défaut
-  let role = requestedRole === 'restauratrice' ? 'restauratrice' : 'user';
-
-  // Si aucun admin n'existe encore, le premier utilisateur non-restauratrice devient admin
-  if (role === 'user' && !users.find(u => u.role === 'admin')) role = 'admin';
-
-  // Construit l'objet du nouvel utilisateur
-  const newUser = {
-    // Identifiant unique basé sur le timestamp actuel
-    id: Date.now().toString(),
-    // Nom complet fourni par l'utilisateur
-    fullName,
-    // Numéro de téléphone fourni par l'utilisateur
-    phone,
-    // Email normalisé en minuscules pour éviter les doublons
-    email: email.toLowerCase(),
-    // Mot de passe hashé (jamais stocké en clair)
-    password: hashedPwd,
-    // Rôle calculé ci-dessus
-    role,
-    // Date de création au format ISO 8601
-    createdAt: new Date().toISOString(),
-  };
-
-  // Ajoute le nouvel utilisateur au tableau en mémoire
-  users.push(newUser);
-
-  // Persiste le tableau mis à jour dans le fichier JSON
-  writeDB(FILES.users, users);
-
-  // Crée un token JWT signé avec les informations essentielles de l'utilisateur
-  const token = jwt.sign(
-    // Payload du token : données accessibles après décodage
-    { id: newUser.id, email: newUser.email, fullName: newUser.fullName, role: newUser.role },
-    // Clé secrète de signature
-    JWT_SECRET,
-    // Options : expiration du token après 7 jours
-    { expiresIn: '7d' }
-  );
-
-  // Retourne le token et les infos publiques de l'utilisateur (sans le mot de passe)
-  res.status(201).json({
-    token,
-    user: { id: newUser.id, fullName: newUser.fullName, email: newUser.email, role: newUser.role }
-  });
-});
-
-// Route POST pour la connexion d'un utilisateur existant
-app.post('/api/login', async (req, res) => {
-  // Récupère l'email et le mot de passe depuis le corps de la requête
-  const { email, password } = req.body;
-
-  // Vérifie que les deux champs sont bien fournis
-  if (!email || !password)
-    return res.status(400).json({ error: 'Email et mot de passe requis' });
-
-  // Charge tous les utilisateurs depuis le fichier JSON
-  const users = readDB(FILES.users);
-
-  // Recherche l'utilisateur par son email (en minuscules)
-  const user = users.find(u => u.email === email.toLowerCase());
-
-  // Si l'utilisateur n'existe pas OU si le mot de passe ne correspond pas
-  if (!user || !(await bcrypt.compare(password, user.password)))
-    // Retourne une erreur 401 générique (ne précise pas lequel est incorrect, pour la sécurité)
-    return res.status(401).json({ error: 'Email ou mot de passe incorrect' });
-
-  // Crée un nouveau token JWT pour la session
-  const token = jwt.sign(
-    // Données encodées dans le token
-    { id: user.id, email: user.email, fullName: user.fullName, role: user.role },
-    // Clé secrète
-    JWT_SECRET,
-    // Durée de validité : 7 jours
-    { expiresIn: '7d' }
-  );
-
-  // Retourne le token et les informations publiques de l'utilisateur
-  res.json({
-    token,
-    user: { id: user.id, fullName: user.fullName, email: user.email, role: user.role }
-  });
-});
-
-// ── Routes des choix de repas ─────────────────────────────────────────────────
-
-// Fonction utilitaire retournant la date du jour au format "YYYY-MM-DD"
+// ── Date du jour YYYY-MM-DD ───────────────────────────────────────────────────
 function todayStr() {
-  // Prend l'ISO string (ex: "2024-12-15T10:30:00.000Z") et garde la partie date
   return new Date().toISOString().split('T')[0];
 }
 
-// Route GET : récupère tous les choix du jour (tous les employés)
-app.get('/api/choices/today', auth, (req, res) => {
-  // Lit tous les choix et filtre uniquement ceux d'aujourd'hui
-  const choices = readDB(FILES.choices).filter(c => c.date === todayStr());
-  // Retourne le tableau des choix du jour
-  res.json(choices);
+// ── Connexion universelle (tous les rôles) ────────────────────────────────────
+app.post('/api/login', async (req, res) => {
+  try {
+    const { identifier, password, loginType } = req.body;
+
+    // ── Validation basique des champs ──
+    // On vérifie que identifier et password ne sont pas vides/undefined
+    if (!identifier || !identifier.toString().trim()) {
+      return res.status(400).json({ error: 'Identifiant requis' });
+    }
+    if (!password) {
+      return res.status(400).json({ error: 'Mot de passe requis' });
+    }
+    if (!loginType) {
+      return res.status(400).json({ error: 'Type de connexion requis' });
+    }
+
+    const id = identifier.toString().trim(); // Nettoie l'identifiant
+
+    // ── CAS 1 : Superadmin ────────────────────────────────────────────────────
+    if (loginType === 'superadmin') {
+      // Comparaison insensible à la casse pour l'email
+      const emailMatch = id.toLowerCase() === SUPERADMIN.email.toLowerCase();
+      const pwdMatch   = password === SUPERADMIN.password;
+
+      if (!emailMatch || !pwdMatch) {
+        // Log utile en développement pour diagnostiquer les erreurs de saisie
+        console.log(`[ADMIN] Tentative: email="${id}" | attendu="${SUPERADMIN.email}" | match=${emailMatch}`);
+        return res.status(401).json({ error: 'Identifiants administrateur incorrects' });
+      }
+
+      const token = jwt.sign(
+        { id: SUPERADMIN.id, role: 'superadmin', fullName: SUPERADMIN.fullName },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+      console.log(`[ADMIN] Connexion superadmin réussie`);
+      return res.json({
+        token,
+        user: { id: SUPERADMIN.id, fullName: SUPERADMIN.fullName, role: 'superadmin' }
+      });
+    }
+
+    // ── CAS 2 : Entreprise (par nom d'entreprise) ─────────────────────────────
+    if (loginType === 'enterprise') {
+      const enterprises = readDB(FILES.enterprises);
+      const ent = enterprises.find(e =>
+        e.companyName.toLowerCase().trim() === id.toLowerCase()
+      );
+
+      if (!ent) {
+        return res.status(401).json({ error: "Nom d'entreprise ou mot de passe incorrect" });
+      }
+
+      const valid = await bcrypt.compare(password, ent.password);
+      if (!valid) {
+        return res.status(401).json({ error: "Nom d'entreprise ou mot de passe incorrect" });
+      }
+
+      const token = jwt.sign(
+        {
+          id:          ent.id,
+          role:        'enterprise',
+          fullName:    ent.companyName,
+          companyName: ent.companyName,
+          domain:      ent.domain
+        },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+      return res.json({
+        token,
+        user: { id: ent.id, fullName: ent.companyName, role: 'enterprise', companyName: ent.companyName, domain: ent.domain }
+      });
+    }
+
+    // ── CAS 3 : Restauratrice (par nom, ordre flexible) ───────────────────────
+    if (loginType === 'restauratrice') {
+      const restauratrices = readDB(FILES.restauratrices);
+      const variants       = nameVariants(id);
+
+      const resto = restauratrices.find(r =>
+        variants.includes(r.fullName.trim().toLowerCase())
+      );
+
+      if (!resto) {
+        return res.status(401).json({ error: 'Nom ou mot de passe incorrect' });
+      }
+
+      const valid = await bcrypt.compare(password, resto.password);
+      if (!valid) {
+        return res.status(401).json({ error: 'Nom ou mot de passe incorrect' });
+      }
+
+      const token = jwt.sign(
+        { id: resto.id, role: 'restauratrice', fullName: resto.fullName },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+      return res.json({
+        token,
+        user: { id: resto.id, fullName: resto.fullName, role: 'restauratrice' }
+      });
+    }
+
+    // ── CAS 4 : Employé (par nom, ordre flexible) ─────────────────────────────
+    if (loginType === 'employee') {
+      const employees = readDB(FILES.employees);
+      const variants  = nameVariants(id);
+
+      const emp = employees.find(e =>
+        variants.includes(e.fullName.trim().toLowerCase())
+      );
+
+      if (!emp) {
+        return res.status(401).json({ error: 'Nom ou mot de passe incorrect' });
+      }
+
+      const valid = await bcrypt.compare(password, emp.password);
+      if (!valid) {
+        return res.status(401).json({ error: 'Nom ou mot de passe incorrect' });
+      }
+
+      const token = jwt.sign(
+        {
+          id:             emp.id,
+          role:           'employee',
+          fullName:       emp.fullName,
+          enterpriseId:   emp.enterpriseId,
+          enterpriseName: emp.enterpriseName
+        },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+      return res.json({
+        token,
+        user: {
+          id:             emp.id,
+          fullName:       emp.fullName,
+          role:           'employee',
+          enterpriseId:   emp.enterpriseId,
+          enterpriseName: emp.enterpriseName
+        }
+      });
+    }
+
+    // Aucun loginType reconnu
+    return res.status(400).json({ error: 'Type de connexion non reconnu' });
+
+  } catch (err) {
+    console.error('Erreur /api/login:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
 });
 
-// Route GET : récupère le choix du jour de l'utilisateur connecté uniquement
+// ── Inscription entreprise ────────────────────────────────────────────────────
+app.post('/api/enterprise/register', async (req, res) => {
+  try {
+    const { companyName, domain, password } = req.body;
+
+    if (!companyName || !domain || !password)
+      return res.status(400).json({ error: 'Tous les champs sont obligatoires' });
+
+    const pwdError = validateEnterprisePwd(password);
+    if (pwdError) return res.status(400).json({ error: pwdError });
+
+    const enterprises = readDB(FILES.enterprises);
+
+    if (enterprises.find(e =>
+      e.companyName.toLowerCase().trim() === companyName.toLowerCase().trim()
+    )) return res.status(409).json({ error: "Ce nom d'entreprise est déjà utilisé" });
+
+    const hashedPwd    = await bcrypt.hash(password, 10);
+    const newEnterprise = {
+      id:          Date.now().toString(),
+      companyName: companyName.trim(),
+      domain:      domain.trim(),
+      password:    hashedPwd,
+      role:        'enterprise',
+      createdAt:   new Date().toISOString(),
+    };
+
+    enterprises.push(newEnterprise);
+    writeDB(FILES.enterprises, enterprises);
+
+    const token = jwt.sign(
+      {
+        id:          newEnterprise.id,
+        role:        'enterprise',
+        fullName:    newEnterprise.companyName,
+        companyName: newEnterprise.companyName,
+        domain:      newEnterprise.domain
+      },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.status(201).json({
+      token,
+      user: {
+        id:          newEnterprise.id,
+        fullName:    newEnterprise.companyName,
+        role:        'enterprise',
+        companyName: newEnterprise.companyName,
+        domain:      newEnterprise.domain
+      }
+    });
+
+  } catch (err) {
+    console.error('Erreur register enterprise:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ── Inscription restauratrice ─────────────────────────────────────────────────
+app.post('/api/restauratrice/register', async (req, res) => {
+  try {
+    const { fullName, password } = req.body;
+
+    if (!fullName || !password)
+      return res.status(400).json({ error: 'Tous les champs sont obligatoires' });
+
+    if (password.length < 6)
+      return res.status(400).json({ error: 'Mot de passe minimum 6 caractères' });
+
+    const restauratrices = readDB(FILES.restauratrices);
+
+    if (restauratrices.find(r =>
+      r.fullName.toLowerCase().trim() === fullName.toLowerCase().trim()
+    )) return res.status(409).json({ error: 'Ce nom est déjà utilisé' });
+
+    const hashedPwd = await bcrypt.hash(password, 10);
+    const newResto  = {
+      id:        Date.now().toString(),
+      fullName:  fullName.trim(),
+      password:  hashedPwd,
+      role:      'restauratrice',
+      createdAt: new Date().toISOString(),
+    };
+
+    restauratrices.push(newResto);
+    writeDB(FILES.restauratrices, restauratrices);
+
+    const token = jwt.sign(
+      { id: newResto.id, role: 'restauratrice', fullName: newResto.fullName },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.status(201).json({
+      token,
+      user: { id: newResto.id, fullName: newResto.fullName, role: 'restauratrice' }
+    });
+
+  } catch (err) {
+    console.error('Erreur register restauratrice:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+
+// ── Créer un employé (entreprise seulement) ───────────────────────────────────
+app.post('/api/enterprise/employees', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'enterprise')
+      return res.status(403).json({ error: 'Accès réservé aux entreprises' });
+
+    const { fullName, password } = req.body;
+
+    if (!fullName || !password)
+      return res.status(400).json({ error: 'Nom complet et mot de passe requis' });
+
+    if (password.length < 6)
+      return res.status(400).json({ error: 'Mot de passe minimum 6 caractères' });
+
+    const employees = readDB(FILES.employees);
+
+    if (employees.find(e =>
+      e.fullName.toLowerCase().trim() === fullName.toLowerCase().trim() &&
+      e.enterpriseId === req.user.id
+    )) return res.status(409).json({ error: 'Un employé avec ce nom existe déjà dans votre entreprise' });
+
+    const hashedPwd   = await bcrypt.hash(password, 10);
+    const newEmployee = {
+      id:             Date.now().toString(),
+      fullName:       fullName.trim(),
+      password:       hashedPwd,
+      role:           'employee',
+      enterpriseId:   req.user.id,
+      enterpriseName: req.user.companyName,
+      createdAt:      new Date().toISOString(),
+    };
+
+    employees.push(newEmployee);
+    writeDB(FILES.employees, employees);
+
+    res.status(201).json({
+      success:  true,
+      employee: { id: newEmployee.id, fullName: newEmployee.fullName, enterpriseName: newEmployee.enterpriseName }
+    });
+
+  } catch (err) {
+    console.error('Erreur création employé:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ── Lister les employés ───────────────────────────────────────────────────────
+app.get('/api/enterprise/employees', auth, (req, res) => {
+  if (!['enterprise', 'superadmin'].includes(req.user.role))
+    return res.status(403).json({ error: 'Accès refusé' });
+
+  const employees = readDB(FILES.employees);
+  const filtered  = req.user.role === 'superadmin'
+    ? employees
+    : employees.filter(e => e.enterpriseId === req.user.id);
+
+  // Ne retourne jamais le mot de passe hashé
+  res.json(filtered.map(({ password, ...e }) => e));
+});
+
+// ── Supprimer un employé ──────────────────────────────────────────────────────
+app.delete('/api/enterprise/employees/:id', auth, (req, res) => {
+  if (req.user.role !== 'enterprise')
+    return res.status(403).json({ error: 'Accès refusé' });
+
+  let employees = readDB(FILES.employees);
+  const idx     = employees.findIndex(e =>
+    e.id === req.params.id && e.enterpriseId === req.user.id
+  );
+
+  if (idx === -1) return res.status(404).json({ error: 'Employé non trouvé' });
+
+  employees.splice(idx, 1);
+  writeDB(FILES.employees, employees);
+  res.json({ success: true });
+});
+
+// ── Choix du jour (filtrés selon le rôle) ────────────────────────────────────
+app.get('/api/choices/today', auth, (req, res) => {
+  const all = readDB(FILES.choices).filter(c => c.date === todayStr());
+
+  if (req.user.role === 'employee')
+    return res.json(all.filter(c => c.enterpriseId === req.user.enterpriseId));
+
+  if (req.user.role === 'enterprise')
+    return res.json(all.filter(c => c.enterpriseId === req.user.id));
+
+  res.json(all); // restauratrice et superadmin voient tout
+});
+
+// ── Mon choix du jour ─────────────────────────────────────────────────────────
 app.get('/api/choices/mine', auth, (req, res) => {
-  // Recherche le choix correspondant à l'utilisateur connecté et à la date du jour
-  const mine = readDB(FILES.choices).find(c => c.userId === req.user.id && c.date === todayStr());
-  // Retourne le choix trouvé ou null si aucun choix n'a été fait aujourd'hui
+  const mine = readDB(FILES.choices).find(
+    c => c.userId === req.user.id && c.date === todayStr()
+  );
   res.json(mine || null);
 });
 
-// Route POST : crée ou met à jour le choix de repas de l'utilisateur connecté
+// ── Soumettre / modifier un choix ────────────────────────────────────────────
 app.post('/api/choices', auth, (req, res) => {
-  // Récupère l'identifiant du plat choisi et le texte libre optionnel
+  if (req.user.role !== 'employee')
+    return res.status(403).json({ error: 'Seuls les employés peuvent faire des choix' });
+
   const { food, customFood } = req.body;
+  if (!food) return res.status(400).json({ error: 'Choix de repas requis' });
 
-  // Vérifie que le champ "food" est bien fourni
-  if (!food) return res.status(400).json({ error: 'Choix requis' });
-
-  // Charge tous les choix existants depuis le fichier JSON
   const choices = readDB(FILES.choices);
+  const today   = todayStr();
 
-  // Récupère la date du jour pour les comparaisons
-  const today = todayStr();
-
-  // Filtre les choix du jour pour vérifier l'état de la commande
-  const todayChoices = choices.filter(c => c.date === today);
-
-  // Si la commande a déjà été lancée aujourd'hui, bloque toute modification
-  if (todayChoices.some(c => c.orderLaunched))
+  // Vérifie si la commande de cette entreprise a déjà été lancée
+  const isLaunched = choices.some(c =>
+    c.date === today && c.enterpriseId === req.user.enterpriseId && c.orderLaunched
+  );
+  if (isLaunched)
     return res.status(403).json({ error: "La commande a déjà été lancée aujourd'hui" });
 
-  // Cherche si l'utilisateur a déjà un choix pour aujourd'hui (pour savoir si c'est un ajout ou une mise à jour)
-  const existing = choices.findIndex(c => c.userId === req.user.id && c.date === today);
+  const existingIdx = choices.findIndex(c => c.userId === req.user.id && c.date === today);
 
-  // ── Vérification du délai de 3 minutes (uniquement pour les MODIFICATIONS) ──
-  if (existing >= 0) {
-    // Calcule le temps écoulé en millisecondes depuis la dernière mise à jour du choix
-    const elapsed = Date.now() - new Date(choices[existing].updatedAt).getTime();
-
-    // Si le délai de 3 minutes est dépassé, refuse la modification
-    if (elapsed > LOCK_MS) {
+  // Vérifie le délai de 5 minutes pour les MODIFICATIONS
+  if (existingIdx >= 0) {
+    const elapsed = Date.now() - new Date(choices[existingIdx].updatedAt).getTime();
+    if (elapsed > LOCK_MS)
       return res.status(403).json({
-        // Message d'erreur affiché à l'utilisateur
-        error: 'Le délai de modification de 3 minutes est expiré. Votre choix est verrouillé.',
-        // Indicateur booléen pour que le frontend sache que c'est un verrou (pas une autre erreur)
-        locked: true,
+        error:  'Le délai de modification de 5 minutes est expiré.',
+        locked: true
       });
-    }
   }
 
-  // Capture le timestamp actuel pour la date de mise à jour
-  const now = new Date().toISOString();
-
-  // Construit l'objet de choix (création ou mise à jour)
+  const now        = new Date().toISOString();
   const choiceData = {
-    // Conserve l'id existant si c'est une mise à jour, sinon génère un nouvel id
-    id: existing >= 0 ? choices[existing].id : Date.now().toString(),
-    // Identifiant de l'utilisateur connecté
-    userId: req.user.id,
-    // Nom complet de l'utilisateur (pour l'affichage dans la grille)
-    userName: req.user.fullName,
-    // Identifiant du plat sélectionné
+    id:           existingIdx >= 0 ? choices[existingIdx].id : Date.now().toString(),
+    userId:       req.user.id,
+    userName:     req.user.fullName,
+    enterpriseId: req.user.enterpriseId,
     food,
-    // Texte libre uniquement si le plat est "Autres", sinon null
-    customFood: food === 'Autres' ? customFood : null,
-    // Date du jour au format YYYY-MM-DD
-    date: today,
-    // Statut de la commande : false tant que l'admin n'a pas lancé la commande
+    customFood:   food === 'Autres' ? customFood : null,
+    date:         today,
     orderLaunched: false,
-    // Date de création : conservée si mise à jour, sinon timestamp actuel
-    createdAt: existing >= 0 ? choices[existing].createdAt : now,
-    // Date de mise à jour : toujours le timestamp actuel (réinitialise le délai de 3 min)
-    updatedAt: now,
+    createdAt:    existingIdx >= 0 ? choices[existingIdx].createdAt : now,
+    updatedAt:    now, // ← réinitialise le compteur de 5 min à chaque modif
   };
 
-  // Si un choix existait, on le remplace ; sinon on l'ajoute au tableau
-  if (existing >= 0) choices[existing] = choiceData;
+  if (existingIdx >= 0) choices[existingIdx] = choiceData;
   else choices.push(choiceData);
 
-  // Persiste le tableau mis à jour dans le fichier JSON
   writeDB(FILES.choices, choices);
-
-  // Retourne le choix créé ou mis à jour
   res.json(choiceData);
 });
 
-// Route DELETE : supprime le choix du jour de l'utilisateur connecté
+// ── Supprimer mon choix ───────────────────────────────────────────────────────
 app.delete('/api/choices/mine', auth, (req, res) => {
-  // Charge tous les choix existants
   let choices = readDB(FILES.choices);
-
-  // Récupère la date du jour
   const today = todayStr();
+  const idx   = choices.findIndex(c => c.userId === req.user.id && c.date === today);
 
-  // Cherche l'index du choix de l'utilisateur connecté pour aujourd'hui
-  const idx = choices.findIndex(c => c.userId === req.user.id && c.date === today);
-
-  // Si aucun choix trouvé, retourne une erreur 404
   if (idx === -1) return res.status(404).json({ error: 'Aucun choix trouvé' });
+  if (choices[idx].orderLaunched) return res.status(403).json({ error: 'La commande a déjà été lancée' });
 
-  // Si la commande a déjà été lancée, la suppression est impossible
-  if (choices[idx].orderLaunched)
-    return res.status(403).json({ error: 'La commande a déjà été lancée' });
-
-  // ── Vérification du délai de 3 minutes pour la SUPPRESSION ──
-  // Calcule le temps écoulé depuis la dernière mise à jour
   const elapsed = Date.now() - new Date(choices[idx].updatedAt).getTime();
-
-  // Si le délai de 3 minutes est dépassé, refuse la suppression
-  if (elapsed > LOCK_MS) {
+  if (elapsed > LOCK_MS)
     return res.status(403).json({
-      // Message explicite affiché à l'utilisateur
-      error: 'Le délai de suppression de 3 minutes est expiré. Votre choix est verrouillé.',
-      // Indicateur de verrou pour le frontend
-      locked: true,
+      error:  'Le délai de 5 minutes est expiré. Votre choix est verrouillé.',
+      locked: true
     });
-  }
 
-  // Supprime l'élément trouvé du tableau (splice modifie le tableau en place)
   choices.splice(idx, 1);
-
-  // Persiste le tableau modifié dans le fichier JSON
   writeDB(FILES.choices, choices);
-
-  // Retourne une confirmation de succès
   res.json({ success: true });
 });
 
-// Route POST : lance la commande du jour (réservée à l'admin uniquement)
+// ── Lancer la commande (entreprise seulement) ─────────────────────────────────
 app.post('/api/choices/launch', auth, (req, res) => {
-  // Vérifie que l'utilisateur connecté est bien un administrateur
-  if (req.user.role !== 'admin')
-    return res.status(403).json({ error: 'Accès refusé' });
+  if (req.user.role !== 'enterprise')
+    return res.status(403).json({ error: "Seule l'entreprise peut lancer la commande" });
 
-  // Charge tous les choix existants
   let choices = readDB(FILES.choices);
-
-  // Récupère la date du jour
   const today = todayStr();
+  let count   = 0;
 
-  // Compteur pour savoir combien de choix ont été marqués comme lancés
-  let count = 0;
-
-  // Parcourt tous les choix et marque ceux d'aujourd'hui comme "orderLaunched = true"
   choices = choices.map(c => {
-    // Si le choix est d'aujourd'hui, on incrémente le compteur et on le marque
-    if (c.date === today) { count++; return { ...c, orderLaunched: true }; }
-    // Sinon on retourne le choix inchangé
+    if (c.date === today && c.enterpriseId === req.user.id) {
+      count++;
+      return { ...c, orderLaunched: true };
+    }
     return c;
   });
 
-  // Si aucun choix n'existe pour aujourd'hui, retourne une erreur
   if (count === 0)
-    return res.status(400).json({ error: "Aucun choix pour aujourd'hui" });
+    return res.status(400).json({ error: "Aucun choix enregistré pour aujourd'hui" });
 
-  // Persiste les choix mis à jour dans le fichier JSON
   writeDB(FILES.choices, choices);
-
-  // Retourne le succès et le nombre de repas commandés
   res.json({ success: true, count });
 });
 
-// Route GET : récupère l'historique complet des choix de l'utilisateur connecté
+// ── Historique de l'utilisateur connecté ─────────────────────────────────────
 app.get('/api/history', auth, (req, res) => {
-  // Filtre les choix appartenant à l'utilisateur connecté et les trie du plus récent au plus ancien
   const history = readDB(FILES.choices)
-    .filter(c => c.userId === req.user.id)  // Garde uniquement les choix de cet utilisateur
-    .sort((a, b) => b.date.localeCompare(a.date)); // Trie par date décroissante
-  // Retourne l'historique trié
+    .filter(c => c.userId === req.user.id)
+    .sort((a, b) => b.date.localeCompare(a.date));
   res.json(history);
 });
 
-// Route GET : récupère un résumé des commandes du jour (admin + restauratrice seulement)
-app.get('/api/choices/summary', auth, (req, res) => {
-  // Vérifie que l'utilisateur est admin ou restauratrice
-  if (!['admin', 'restauratrice'].includes(req.user.role))
+
+// ── Récupérer tous les messages ───────────────────────────────────────────────
+app.get('/api/messages', auth, (req, res) => {
+  if (!['enterprise', 'restauratrice'].includes(req.user.role))
+    return res.status(403).json({ error: "Messagerie réservée à l'entreprise et à la restauratrice" });
+
+  const messages = readDB(FILES.messages)
+    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  res.json(messages);
+});
+
+// ── Envoyer un message ────────────────────────────────────────────────────────
+app.post('/api/messages', auth, (req, res) => {
+  if (!['enterprise', 'restauratrice'].includes(req.user.role))
     return res.status(403).json({ error: 'Accès refusé' });
 
-  // Filtre et retourne tous les choix du jour
+  const { content } = req.body;
+  if (!content?.trim()) return res.status(400).json({ error: 'Le message ne peut pas être vide' });
+
+  const messages = readDB(FILES.messages);
+  const msg = {
+    id:         Date.now().toString(),
+    senderId:   req.user.id,
+    senderName: req.user.fullName,
+    senderRole: req.user.role,
+    content:    content.trim(),
+    timestamp:  new Date().toISOString(),
+    readBy:     [req.user.id], // L'expéditeur a déjà "lu" son propre message
+  };
+
+  messages.push(msg);
+  writeDB(FILES.messages, messages);
+  res.status(201).json(msg);
+});
+
+// ── Marquer les messages comme lus ────────────────────────────────────────────
+app.post('/api/messages/read', auth, (req, res) => {
+  if (!['enterprise', 'restauratrice'].includes(req.user.role))
+    return res.status(403).json({ error: 'Accès refusé' });
+
+  let messages = readDB(FILES.messages);
+  messages = messages.map(m => ({
+    ...m,
+    readBy: m.readBy.includes(req.user.id) ? m.readBy : [...m.readBy, req.user.id],
+  }));
+  writeDB(FILES.messages, messages);
+  res.json({ success: true });
+});
+
+// ── Nombre de messages non lus ────────────────────────────────────────────────
+app.get('/api/messages/unread', auth, (req, res) => {
+  if (!['enterprise', 'restauratrice'].includes(req.user.role))
+    return res.json({ count: 0 });
+
+  const count = readDB(FILES.messages)
+    .filter(m => !m.readBy.includes(req.user.id) && m.senderId !== req.user.id)
+    .length;
+  res.json({ count });
+});
+
+
+// ── Toutes les entreprises ────────────────────────────────────────────────────
+app.get('/api/admin/enterprises', auth, (req, res) => {
+  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Accès refusé' });
+  const list = readDB(FILES.enterprises).map(({ password, ...e }) => e);
+  res.json(list);
+});
+
+// ── Tous les employés ─────────────────────────────────────────────────────────
+app.get('/api/admin/employees', auth, (req, res) => {
+  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Accès refusé' });
+  const list = readDB(FILES.employees).map(({ password, ...e }) => e);
+  res.json(list);
+});
+
+// ── Toutes les restauratrices ─────────────────────────────────────────────────
+app.get('/api/admin/restauratrices', auth, (req, res) => {
+  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Accès refusé' });
+  const list = readDB(FILES.restauratrices).map(({ password, ...r }) => r);
+  res.json(list);
+});
+
+// ── Commandes du jour (toutes entreprises) ────────────────────────────────────
+app.get('/api/admin/choices/today', auth, (req, res) => {
+  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Accès refusé' });
   const choices = readDB(FILES.choices).filter(c => c.date === todayStr());
   res.json(choices);
 });
 
-// ── Routes de messagerie ──────────────────────────────────────────────────────
-
-// Route GET : récupère tous les messages triés par ordre chronologique
-app.get('/api/messages', auth, (req, res) => {
-  // Seuls l'admin et la restauratrice peuvent accéder à la messagerie
-  if (!['admin', 'restauratrice'].includes(req.user.role))
-    return res.status(403).json({ error: 'Accès refusé' });
-
-  // Charge les messages et les trie du plus ancien au plus récent
-  const messages = readDB(FILES.messages).sort((a, b) =>
-    // Compare les timestamps pour trier chronologiquement
-    new Date(a.timestamp) - new Date(b.timestamp)
-  );
-  // Retourne la liste triée
-  res.json(messages);
+// ── Historique global ─────────────────────────────────────────────────────────
+app.get('/api/admin/history', auth, (req, res) => {
+  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Accès refusé' });
+  const history = readDB(FILES.choices).sort((a, b) => b.date.localeCompare(a.date));
+  res.json(history);
 });
 
-// Route POST : envoie un nouveau message
-app.post('/api/messages', auth, (req, res) => {
-  // Seuls l'admin et la restauratrice peuvent envoyer des messages
-  if (!['admin', 'restauratrice'].includes(req.user.role))
-    return res.status(403).json({ error: 'Accès refusé' });
-
-  // Récupère le contenu du message depuis le corps de la requête
-  const { content } = req.body;
-
-  // Refuse les messages vides ou ne contenant que des espaces
-  if (!content?.trim()) return res.status(400).json({ error: 'Message vide' });
-
-  // Charge les messages existants
-  const messages = readDB(FILES.messages);
-
-  // Construit l'objet du nouveau message
-  const msg = {
-    // Identifiant unique basé sur le timestamp
-    id: Date.now().toString(),
-    // Identifiant de l'expéditeur
-    senderId: req.user.id,
-    // Nom complet de l'expéditeur (pour l'affichage)
-    senderName: req.user.fullName,
-    // Rôle de l'expéditeur (admin ou restauratrice)
-    senderRole: req.user.role,
-    // Contenu nettoyé des espaces superflus
-    content: content.trim(),
-    // Horodatage de l'envoi au format ISO 8601
-    timestamp: new Date().toISOString(),
-    // Tableau des IDs ayant lu ce message (l'expéditeur l'a déjà "lu")
-    readBy: [req.user.id],
-  };
-
-  // Ajoute le message au tableau
-  messages.push(msg);
-
-  // Persiste la liste mise à jour
-  writeDB(FILES.messages, messages);
-
-  // Retourne le message créé avec un statut 201 (créé)
-  res.status(201).json(msg);
+app.listen(PORT, () => {
+  console.log(`\n  LunchApp démarré → http://localhost:${PORT}`);
+  console.log(`  Superadmin : ${SUPERADMIN.email}`);
+  console.log(`🔑  Mot de passe : ${SUPERADMIN.password}\n`);
 });
-
-// Route POST : marque tous les messages comme lus pour l'utilisateur connecté
-app.post('/api/messages/read', auth, (req, res) => {
-  // Seuls l'admin et la restauratrice ont accès
-  if (!['admin', 'restauratrice'].includes(req.user.role))
-    return res.status(403).json({ error: 'Accès refusé' });
-
-  // Charge tous les messages
-  let messages = readDB(FILES.messages);
-
-  // Pour chaque message, ajoute l'ID de l'utilisateur dans "readBy" s'il n'y est pas déjà
-  messages = messages.map(m => ({
-    ...m, // Copie toutes les propriétés existantes
-    // Si l'utilisateur a déjà lu ce message, garde readBy tel quel ; sinon l'ajoute
-    readBy: m.readBy.includes(req.user.id) ? m.readBy : [...m.readBy, req.user.id],
-  }));
-
-  // Persiste les messages mis à jour
-  writeDB(FILES.messages, messages);
-
-  // Confirme le succès
-  res.json({ success: true });
-});
-
-// Route GET : retourne le nombre de messages non lus pour l'utilisateur connecté
-app.get('/api/messages/unread', auth, (req, res) => {
-  // Si l'utilisateur n'est pas admin ou restauratrice, retourne 0 (pas d'accès à la messagerie)
-  if (!['admin', 'restauratrice'].includes(req.user.role))
-    return res.json({ count: 0 });
-
-  // Compte les messages non envoyés par l'utilisateur et non lus par lui
-  const count = readDB(FILES.messages)
-    .filter(m =>
-      // Le message n'a pas été lu par cet utilisateur
-      !m.readBy.includes(req.user.id) &&
-      // Et ce n'est pas l'utilisateur lui-même qui l'a envoyé
-      m.senderId !== req.user.id
-    ).length; // Retourne le nombre d'éléments filtrés
-
-  // Retourne le compteur
-  res.json({ count });
-});
-
-// ── Démarrage du serveur ──────────────────────────────────────────────────────
-
-// Lance le serveur sur le port défini et affiche un message de confirmation dans la console
-app.listen(PORT, () => console.log(`\n LunchApp → http://localhost:${PORT}\n`));
