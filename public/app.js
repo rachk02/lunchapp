@@ -15,14 +15,24 @@ const FOODS = [
 const LOCK_MS = 5 * 60 * 1000; // 5 minutes en millisecondes
 
 // ── État global de l'application ─────────────────────────────────────────────
-let token            = localStorage.getItem('la_token');           // Token JWT de session
-let me               = JSON.parse(localStorage.getItem('la_user') || 'null'); // Utilisateur connecté
-let selectedFood     = null;       // Plat sélectionné dans le modal
-let isEditMode       = false;      // true = modification, false = nouveau choix
-let currentLoginType = 'employee'; // Type de connexion actif
-let intervals        = [];         // Intervalles de rafraîchissement automatique
-let choiceTimer      = null;       // Intervalle du compte à rebours de 5 min
-let toastTimer;                    // Timer de disparition du toast
+let token            = localStorage.getItem('la_token');
+let me               = JSON.parse(localStorage.getItem('la_user') || 'null');
+let selectedFood     = null;
+let isEditMode       = false;
+let currentLoginType = 'employee';
+let intervals        = [];
+let choiceTimer      = null;
+let toastTimer;
+
+// ── SSE ───────────────────────────────────────────────────────────────────────
+let sseSource        = null;
+
+// ── Enregistrement audio ──────────────────────────────────────────────────────
+let mediaRecorder     = null;
+let audioChunks       = [];
+let audioBlob         = null;
+let recordingInterval = null;
+let recordingSeconds  = 0;
 
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -227,6 +237,7 @@ function logout() {
   localStorage.removeItem('la_user');
   intervals.forEach(clearInterval); intervals = [];
   stopChoiceTimer();
+  if (sseSource) { sseSource.close(); sseSource = null; }
   showScreen('landing-screen');
 }
 
@@ -234,7 +245,7 @@ function logout() {
 function bootApp() {
   // Configuration des badges de rôle
   const roleConfig = {
-    employee:      { badge: '👤 Employé(e)',         color: 'var(--o1)' },
+    employee:      { badge: 'Employé(e)',            color: 'var(--o1)' },
     enterprise:    { badge: ' Chargé de commande', color: 'var(--s1)' },
     restauratrice: { badge: '👩 Restauratrice',      color: 'var(--green)' },
     superadmin:    { badge: ' Super Admin',         color: 'var(--red)' },
@@ -268,10 +279,109 @@ function bootApp() {
   // Rafraîchissement automatique toutes les 20s
   intervals.push(setInterval(loadToday, 20000));
 
-  // Polling des messages non lus toutes les 8s
+  // SSE + notifications pour messagerie
   if (['enterprise', 'restauratrice'].includes(me.role)) {
-    intervals.push(setInterval(pollUnread, 8000));
+    connectSSE();
+    requestNotifPermission();
+    intervals.push(setInterval(pollUnread, 15000)); // fallback polling
   }
+}
+
+// ════════════════════════════════════════════════════════════════
+// SSE — NOTIFICATIONS TEMPS RÉEL
+// ════════════════════════════════════════════════════════════════
+
+function connectSSE() {
+  if (!token) return;
+  if (sseSource) { sseSource.close(); sseSource = null; }
+
+  sseSource = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
+
+  sseSource.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data.type === 'new_message') onNewMessageSSE(data.message);
+    } catch {}
+  };
+
+  sseSource.onerror = () => {
+    // Reconnexion automatique après 5 s si la connexion se coupe
+    if (sseSource) { sseSource.close(); sseSource = null; }
+    setTimeout(() => { if (token) connectSSE(); }, 5000);
+  };
+}
+
+function onNewMessageSSE(msg) {
+  // Met à jour le badge non-lus
+  pollUnread();
+
+  // Si la section messagerie est ouverte → recharge silencieusement
+  const chatActive = document.getElementById('section-messages').classList.contains('active');
+  if (chatActive) { loadMessages(); return; }
+
+  // Sinon : notification navigateur + son
+  const preview = msg.type === 'audio' ? '🎤 Message vocal' : msg.content;
+  showBrowserNotif(msg.senderName, preview);
+  playNotifSound();
+  showInAppBanner(msg.senderName, preview);
+}
+
+// ── Notification navigateur ───────────────────────────────────────────────────
+function requestNotifPermission() {
+  if ('Notification' in window && Notification.permission === 'default')
+    Notification.requestPermission();
+}
+
+function showBrowserNotif(senderName, body) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const n = new Notification(senderName, { body, icon: '' });
+  n.onclick = () => { window.focus(); showSection('messages'); n.close(); };
+  setTimeout(() => n.close(), 6000);
+}
+
+function playNotifSound() {
+  try {
+    const ctx  = new (window.AudioContext || window.webkitAudioContext)();
+    const osc  = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.type = 'sine';
+    // Deux notes courtes "ding-ding"
+    [880, 1100].forEach((freq, i) => {
+      const t = ctx.currentTime + i * 0.18;
+      osc.frequency.setValueAtTime(freq, t);
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.22, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+    });
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.4);
+    setTimeout(() => ctx.close(), 1000);
+  } catch {}
+}
+
+// ── Bandeau in-app (quand la section messages n'est pas active) ───────────────
+function showInAppBanner(senderName, preview) {
+  const existing = document.getElementById('notif-banner');
+  if (existing) existing.remove();
+
+  const banner = document.createElement('div');
+  banner.id = 'notif-banner';
+  banner.className = 'notif-banner';
+  banner.innerHTML = `
+    <div class="nb-content">
+      <span class="nb-icon"><i class="ph-fill ph-chat-circle-dots"></i></span>
+      <div class="nb-text">
+        <strong>${esc(senderName)}</strong>
+        <span>${esc(preview.length > 50 ? preview.slice(0, 50) + '…' : preview)}</span>
+      </div>
+    </div>
+    <button class="nb-open" onclick="showSection('messages');this.closest('.notif-banner').remove()">Voir</button>
+    <button class="nb-close" onclick="this.closest('.notif-banner').remove()">✕</button>`;
+  document.body.appendChild(banner);
+
+  // Auto-fermeture après 6 s
+  setTimeout(() => { if (banner.parentNode) banner.remove(); }, 6000);
 }
 
 // Configure la navigation mobile selon le rôle
@@ -280,17 +390,17 @@ function setupBottomNav() {
 
   const tabs = {
     employee:      [
-      { icon: '🍽️', label: "Aujourd'hui", section: 'today' },
-      { icon: '📋', label: 'Historique',   section: 'history' },
+      { icon: '<i class="ph-fill ph-fork-knife"></i>', label: "Aujourd'hui", section: 'today' },
+      { icon: '<i class="ph-fill ph-clock-countdown"></i>', label: 'Historique',   section: 'history' },
     ],
     enterprise:    [
-      { icon: '🍽️', label: "Aujourd'hui", section: 'today' },
-      { icon: '👥', label: 'Employés',     section: 'employees' },
-      { icon: '💬', label: 'Messages',     section: 'messages', badge: true },
+      { icon: '<i class="ph-fill ph-fork-knife"></i>', label: "Aujourd'hui", section: 'today' },
+      { icon: '<i class="ph-fill ph-users"></i>', label: 'Employés',     section: 'employees' },
+      { icon: '<i class="ph-fill ph-chat-circle-dots"></i>', label: 'Messages',     section: 'messages', badge: true },
     ],
     restauratrice: [
-      { icon: '🍽️', label: 'Commandes',   section: 'today' },
-      { icon: '💬', label: 'Messages',     section: 'messages', badge: true },
+      { icon: '<i class="ph-fill ph-fork-knife"></i>', label: 'Commandes',   section: 'today' },
+      { icon: '<i class="ph-fill ph-chat-circle-dots"></i>', label: 'Messages',     section: 'messages', badge: true },
     ],
     superadmin:    [
       { icon: '', label: 'Dashboard',    section: 'admin' },
@@ -310,7 +420,7 @@ function setupBottomNav() {
     </button>`).join('') +
     // Bouton déconnexion toujours présent dans la nav mobile
     `<button class="bnav-btn bnav-logout" onclick="logout()">
-      <span class="bnav-icon">⎋</span>
+      <span class="bnav-icon"><i class="ph-bold ph-sign-out"></i></span>
       <span class="bnav-label">Sortir</span>
     </button>`;
 }
@@ -364,11 +474,11 @@ function renderMyChoice(c) {
       'Choisi à ' + new Date(c.updatedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 
     if (c.orderLaunched) {
-      badge.innerHTML       = '<span class="badge-launched">✅ Commande lancée</span>';
+      badge.innerHTML       = '<span class="badge-launched"><i class="ph-bold ph-check-circle"></i> Commande lancée</span>';
       actions.style.display = 'none';
       timerWrap.innerHTML   = renderTimerLocked('Commande transmise à la restauratrice.');
     } else {
-      badge.innerHTML = '<span class="badge-pending">⏳ En attente</span>';
+      badge.innerHTML = '<span class="badge-pending"><i class="ph-bold ph-hourglass-medium"></i> En attente</span>';
       startChoiceTimer(c.updatedAt, actions, timerWrap);
     }
 
@@ -445,7 +555,7 @@ function renderTeamGrid(all) {
 
   if (!all.length) {
     grid.innerHTML = `<div class="empty-grid">
-      <div class="eg-icon">🍽️</div>
+      <div class="eg-icon"><i class="ph-thin ph-bowl-food"></i></div>
       <p>Aucun choix pour aujourd'hui</p>
       <small>Soyez le premier à choisir !</small>
     </div>`;
@@ -479,7 +589,7 @@ function renderEnterprisePanel(all) {
 
   document.getElementById('enterprise-panel-title').textContent = ` ${me.companyName}`;
   document.getElementById('enterprise-subtitle').textContent = launched
-    ? `✅ Commande lancée — ${all.length} repas commandés`
+    ? `<i class="ph-bold ph-check-circle"></i> Commande lancée — ${all.length} repas commandés`
     : `${all.length} employé(s) ont fait leur choix`;
 
   const btn = document.getElementById('launch-btn');
@@ -492,15 +602,16 @@ function renderEnterprisePanel(all) {
 }
 
 function renderRestoPanel(all) {
-  const launched = all.some(c => c.orderLaunched);
+  const launched   = all.some(c => c.orderLaunched);
+  const entName    = me.enterpriseName ? ` — ${me.enterpriseName}` : '';
 
   document.getElementById('resto-subtitle').textContent = launched
-    ? `✅ ${all.length} commandes reçues`
-    : `⏳ ${all.length} choix — commande en attente`;
+    ? `<i class="ph-bold ph-check-circle"></i> ${all.length} commandes reçues${entName}`
+    : `<i class="ph-bold ph-hourglass-medium"></i> ${all.length} choix en attente${entName}`;
 
   document.getElementById('resto-status-badge').innerHTML = launched
-    ? '<span class="badge-launched">✅ Commande confirmée</span>'
-    : '<span class="badge-pending">⏳ En attente</span>';
+    ? '<span class="badge-launched"><i class="ph-bold ph-check-circle"></i> Commande confirmée</span>'
+    : '<span class="badge-pending"><i class="ph-bold ph-hourglass-medium"></i> En attente</span>';
 
   renderDishCounts('dish-counts-resto', all, false);
 }
@@ -720,6 +831,41 @@ async function deleteEmployee(id) {
 }
 
 
+// ── Gestion restauratrice (créée par l'entreprise) ────────────────────────────
+
+function openAddRestoModal() {
+  document.getElementById('resto-modal-name').value     = '';
+  document.getElementById('resto-modal-password').value = '';
+  document.getElementById('resto-modal-error').classList.add('hidden');
+  document.getElementById('resto-modal').classList.remove('hidden');
+}
+
+function closeRestoModal() { document.getElementById('resto-modal').classList.add('hidden'); }
+
+async function submitAddResto() {
+  const fullName = document.getElementById('resto-modal-name').value.trim();
+  const password = document.getElementById('resto-modal-password').value;
+
+  if (!fullName || !password) { setRestoModalErr('Veuillez remplir le nom et le mot de passe.'); return; }
+  if (password.length < 6)   { setRestoModalErr('Le mot de passe doit contenir au moins 6 caractères.'); return; }
+
+  const btn = document.querySelector('#resto-modal .btn-submit');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="btn-spinner"></span> Création...';
+
+  try {
+    await api('/api/enterprise/restauratrice', 'POST', { fullName, password });
+    closeRestoModal();
+    toast(`✅ Compte restauratrice créé pour ${fullName} !`, 'ok');
+  } catch (err) {
+    setRestoModalErr(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Créer le compte restauratrice <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>';
+  }
+}
+
+
 async function loadHistory() {
   const el = document.getElementById('history-list');
   el.innerHTML = '<div class="skeleton-state">Chargement...</div>';
@@ -750,7 +896,7 @@ async function loadHistory() {
             ${c.food === 'Autres' && c.customFood ? `<div class="hi-custom-txt">${esc(c.customFood)}</div>` : ''}
           </div>
           <span class="hi-st ${c.orderLaunched ? 'ok' : 'wait'}">
-            ${c.orderLaunched ? '✅ Commandé' : '⏳ En attente'}
+            ${c.orderLaunched ? '<i class="ph-fill ph-check-circle"></i> Commandé' : '<i class="ph-fill ph-hourglass-medium"></i> En attente'}
           </span>
         </div>`;
     }).join('');
@@ -769,7 +915,7 @@ async function loadMessages() {
 
     if (!msgs.length) {
       box.innerHTML = `<div class="chat-empty">
-        <div class="ce-icon">💬</div>
+        <div class="ce-icon"><i class="ph-thin ph-chat-circle-dots"></i></div>
         <p>Aucun message pour l'instant</p>
         <small>Démarrez la conversation !</small>
       </div>`;
@@ -795,9 +941,22 @@ async function loadMessages() {
       const isMine = m.senderId === me.id;
       const wrap   = document.createElement('div');
       wrap.className = `msg-wrap ${isMine ? 'sent' : 'recv'}`;
+
+      let bubbleContent;
+      if (m.type === 'audio') {
+        bubbleContent = `
+          <div class="audio-msg-wrap">
+            <span class="audio-msg-icon">🎤</span>
+            <audio class="audio-msg-player" controls data-msg-id="${m.id}"
+                   onplay="loadAudioSrc(this)"></audio>
+          </div>`;
+      } else {
+        bubbleContent = esc(m.content);
+      }
+
       wrap.innerHTML = `
         <div class="msg-meta">${isMine ? 'Vous' : esc(m.senderName)}</div>
-        <div class="msg-bubble">${esc(m.content)}</div>
+        <div class="msg-bubble ${m.type === 'audio' ? 'msg-bubble-audio' : ''}">${bubbleContent}</div>
         <div class="msg-time">${new Date(m.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>`;
       box.appendChild(wrap);
     });
@@ -826,6 +985,117 @@ function chatKeydown(e) {
   inp.style.height = Math.min(inp.scrollHeight, 120) + 'px';
 }
 
+// Chargement lazy de l'audio au premier play (src vide au rendu)
+async function loadAudioSrc(audioEl) {
+  if (audioEl.src && audioEl.src !== window.location.href) return; // déjà chargé
+  const msgId = audioEl.dataset.msgId;
+  try {
+    const { audioData } = await api(`/api/messages/${msgId}/audio`);
+    audioEl.src = audioData;
+    audioEl.play();
+  } catch { toast('Impossible de charger l\'audio', 'err'); }
+}
+
+// ════════════════════════════════════════════════════════════════
+// ENREGISTREMENT AUDIO
+// ════════════════════════════════════════════════════════════════
+
+async function startRecording() {
+  if (!navigator.mediaDevices?.getUserMedia)
+    return toast('Microphone non disponible sur ce navigateur', 'err');
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+    // Choisit le meilleur format supporté
+    const mime = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4','']
+      .find(t => !t || MediaRecorder.isTypeSupported(t));
+
+    mediaRecorder = new MediaRecorder(stream, mime ? { mimeType: mime } : {});
+    audioChunks   = [];
+
+    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      audioBlob = new Blob(audioChunks, { type: mime || 'audio/webm' });
+      stream.getTracks().forEach(t => t.stop());
+      showAudioPreview();
+    };
+
+    mediaRecorder.start(200);
+    recordingSeconds = 0;
+
+    // Bascule l'interface en mode enregistrement
+    document.getElementById('text-composer').classList.add('hidden');
+    document.getElementById('audio-record-zone').classList.remove('hidden');
+    document.getElementById('arc-recording-state').classList.remove('hidden');
+    document.getElementById('arc-preview-state').classList.add('hidden');
+    updateRecordTimer();
+
+    recordingInterval = setInterval(() => {
+      recordingSeconds++;
+      updateRecordTimer();
+      if (recordingSeconds >= 120) stopRecording(); // Limite 2 min
+    }, 1000);
+
+  } catch {
+    toast('Accès au microphone refusé. Vérifiez les permissions.', 'err');
+  }
+}
+
+function updateRecordTimer() {
+  const m = Math.floor(recordingSeconds / 60);
+  const s = (recordingSeconds % 60).toString().padStart(2, '0');
+  const el = document.getElementById('arc-timer');
+  if (el) el.textContent = `${m}:${s}`;
+}
+
+function stopRecording() {
+  if (recordingInterval) { clearInterval(recordingInterval); recordingInterval = null; }
+  if (mediaRecorder?.state === 'recording') mediaRecorder.stop();
+}
+
+function showAudioPreview() {
+  document.getElementById('arc-recording-state').classList.add('hidden');
+  document.getElementById('arc-preview-state').classList.remove('hidden');
+  const player = document.getElementById('arc-preview-player');
+  player.src = URL.createObjectURL(audioBlob);
+}
+
+function cancelAudio() {
+  stopRecording();
+  if (audioBlob) { URL.revokeObjectURL(document.getElementById('arc-preview-player').src); }
+  audioBlob = null; audioChunks = [];
+  document.getElementById('audio-record-zone').classList.add('hidden');
+  document.getElementById('text-composer').classList.remove('hidden');
+}
+
+async function sendAudioMessage() {
+  if (!audioBlob) return;
+
+  const btn = document.getElementById('arc-send-audio-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="btn-spinner"></span> Envoi…';
+
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      await api('/api/messages', 'POST', {
+        type: 'audio',
+        audioData: e.target.result,
+        content: '🎤 Message vocal',
+      });
+      cancelAudio();
+      toast('🎤 Message vocal envoyé !', 'ok');
+      loadMessages();
+    } catch (err) {
+      toast(err.message, 'err');
+      btn.disabled = false;
+      btn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg> Envoyer';
+    }
+  };
+  reader.readAsDataURL(audioBlob);
+}
+
 async function pollUnread() {
   try {
     const { count } = await api('/api/messages/unread');
@@ -846,6 +1116,62 @@ function updateNotifBadge(count) {
 }
 
 
+// Cache des données admin pour les modals
+let adminData = { enterprises: [], employees: [], restos: [], choices: [] };
+
+// ────────────────────────────────────────────────────────────────
+//  INLINE RENAME — clic direct sur le nom pour l'éditer
+// ────────────────────────────────────────────────────────────────
+
+function startInlineRename(el) {
+  if (el.classList.contains('editing')) return;
+  el.classList.add('editing');
+  const type        = el.dataset.type;
+  const id          = el.dataset.id;
+  const currentName = el.textContent.trim();
+
+  el.innerHTML = '';
+  const input = document.createElement('input');
+  input.className   = 'inline-rename-input';
+  input.value       = currentName;
+  input._committed  = false;
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  { e.preventDefault(); input._committed = true; commitInlineRename(input, el, type, id, currentName); }
+    if (e.key === 'Escape') { el.classList.remove('editing'); el.textContent = currentName; }
+  });
+  input.addEventListener('blur', () => {
+    if (!input._committed) commitInlineRename(input, el, type, id, currentName);
+  });
+
+  el.appendChild(input);
+  // stop click from bubbling to parent items
+  input.addEventListener('click', e => e.stopPropagation());
+  input.focus();
+  input.select();
+}
+
+async function commitInlineRename(input, el, type, id, original) {
+  input._committed = true;
+  el.classList.remove('editing');
+  const newName = input.value.trim();
+
+  if (!newName || newName === original) { el.textContent = original; return; }
+
+  try {
+    await api(`/api/admin/users/${type}/${id}`, 'PATCH', { newName });
+    el.textContent = newName;
+    // Mettre à jour le cache local
+    if (type === 'enterprise')   { const e = adminData.enterprises.find(x => x.id === id); if (e) e.companyName = newName; }
+    else if (type === 'employee'){ const e = adminData.employees.find(x => x.id === id);   if (e) e.fullName    = newName; }
+    else                         { const r = adminData.restos.find(x => x.id === id);       if (r) r.fullName    = newName; }
+    toast('Nom mis à jour !', 'ok');
+  } catch (err) {
+    el.textContent = original;
+    toast(err.message || 'Erreur lors de la mise à jour.', 'err');
+  }
+}
+
 async function loadAdminDashboard() {
   if (me.role !== 'superadmin') return;
 
@@ -858,12 +1184,14 @@ async function loadAdminDashboard() {
       api('/api/admin/history'),
     ]);
 
+    adminData = { enterprises, employees, restos, choices: todayChoices };
+
     // Stats
     document.getElementById('admin-stats-grid').innerHTML = `
-      <div class="admin-stat-card"><div class="asc-icon orange"></div><div><div class="asc-num">${enterprises.length}</div><div class="asc-label">Entreprises</div></div></div>
-      <div class="admin-stat-card"><div class="asc-icon blue"></div><div><div class="asc-num">${employees.length}</div><div class="asc-label">Employés</div></div></div>
-      <div class="admin-stat-card"><div class="asc-icon green"></div><div><div class="asc-num">${todayChoices.length}</div><div class="asc-label">Commandes aujourd'hui</div></div></div>
-      <div class="admin-stat-card"><div class="asc-icon orange"></div><div><div class="asc-num">${restos.length}</div><div class="asc-label">Restauratrices</div></div></div>`;
+      <div class="admin-stat-card"><div class="asc-icon orange"><i class="ph-fill ph-buildings"></i></div><div><div class="asc-num">${enterprises.length}</div><div class="asc-label">Entreprises</div></div></div>
+      <div class="admin-stat-card"><div class="asc-icon blue"><i class="ph-fill ph-users"></i></div><div><div class="asc-num">${employees.length}</div><div class="asc-label">Employés</div></div></div>
+      <div class="admin-stat-card"><div class="asc-icon green"><i class="ph-fill ph-fork-knife"></i></div><div><div class="asc-num">${todayChoices.length}</div><div class="asc-label">Commandes aujourd'hui</div></div></div>
+      <div class="admin-stat-card"><div class="asc-icon purple"><i class="ph-fill ph-chef-hat"></i></div><div><div class="asc-num">${restos.length}</div><div class="asc-label">Restauratrices</div></div></div>`;
 
     // Entreprises
     document.getElementById('admin-ent-count').textContent = enterprises.length;
@@ -873,19 +1201,73 @@ async function loadAdminDashboard() {
           return `<div class="admin-ent-item" style="animation-delay:${i * 0.05}s">
             <div class="aei-header">
               <div class="aei-icon"></div>
-              <div>
-                <div class="aei-name">${esc(ent.companyName)}</div>
+              <div class="aei-info">
+                <div class="aei-name admin-editable-name" data-type="enterprise" data-id="${ent.id}" onclick="startInlineRename(this)" title="Cliquer pour renommer">${esc(ent.companyName)}</div>
                 <div class="aei-domain">${esc(ent.domain)} — ${entEmps.length} employé(s) — Créée le ${new Date(ent.createdAt).toLocaleDateString('fr-FR')}</div>
+              </div>
+              <div class="admin-item-actions">
+                <button class="aia-btn aia-edit" title="Renommer" onclick="openAdminRenameModal('enterprise','${ent.id}')">
+                  <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zm-2.207 2.207L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
+                </button>
+                <button class="aia-btn aia-del" title="Supprimer" onclick="adminDeleteUser('enterprise','${ent.id}')">
+                  <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+                </button>
               </div>
             </div>
             <div class="aei-employees">
               ${entEmps.length
-                ? entEmps.map(e => `<span class="aei-emp-chip">👤 ${esc(e.fullName)}</span>`).join('')
+                ? entEmps.map(e => `<span class="aei-emp-chip"><i class="ph-bold ph-user"></i> ${esc(e.fullName)}</span>`).join('')
                 : '<span style="font-size:.78rem;color:var(--ink5)">Aucun employé</span>'}
             </div>
           </div>`;
         }).join('')
       : '<div class="empty-hist"><p>Aucune entreprise inscrite</p></div>';
+
+    // Employés
+    document.getElementById('admin-emp-count').textContent = employees.length;
+    document.getElementById('admin-employees-list').innerHTML = employees.length
+      ? employees.map((emp, i) => {
+          const entName = enterprises.find(e => e.id === emp.enterpriseId)?.companyName || '—';
+          return `<div class="admin-user-item" style="animation-delay:${i * 0.04}s">
+            <div class="aui-avatar">${initials(emp.fullName)}</div>
+            <div class="aui-info">
+              <div class="aui-name admin-editable-name" data-type="employee" data-id="${emp.id}" onclick="startInlineRename(this)" title="Cliquer pour renommer">${esc(emp.fullName)}</div>
+              <div class="aui-sub"><i class="ph-bold ph-buildings"></i> ${esc(entName)}</div>
+            </div>
+            <div class="admin-item-actions">
+              <button class="aia-btn aia-edit" title="Renommer" onclick="openAdminRenameModal('employee','${emp.id}')">
+                <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zm-2.207 2.207L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
+              </button>
+              <button class="aia-btn aia-del" title="Supprimer" onclick="adminDeleteUser('employee','${emp.id}')">
+                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+              </button>
+            </div>
+          </div>`;
+        }).join('')
+      : '<div class="empty-hist"><p>Aucun employé inscrit</p></div>';
+
+    // Restauratrices
+    document.getElementById('admin-restos-count').textContent = restos.length;
+    document.getElementById('admin-restos-list').innerHTML = restos.length
+      ? restos.map((r, i) => {
+          const entName = enterprises.find(e => e.id === r.enterpriseId)?.companyName || '—';
+          return `<div class="admin-user-item" style="animation-delay:${i * 0.04}s">
+            <div class="aui-avatar aui-avatar-green">${initials(r.fullName)}</div>
+            <div class="aui-info">
+              <div class="aui-name admin-editable-name" data-type="restauratrice" data-id="${r.id}" onclick="startInlineRename(this)" title="Cliquer pour renommer">${esc(r.fullName)}</div>
+              <div class="aui-sub"><i class="ph-bold ph-buildings"></i> ${esc(entName)}</div>
+            </div>
+            <div class="admin-item-actions">
+              <button class="aia-btn aia-edit" title="Renommer" onclick="openAdminRenameModal('restauratrice','${r.id}')">
+                <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zm-2.207 2.207L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
+              </button>
+              <button class="aia-btn aia-del" title="Supprimer" onclick="adminDeleteUser('restauratrice','${r.id}')">
+                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+              </button>
+            </div>
+          </div>`;
+        }).join('')
+      : '<div class="empty-hist"><p>Aucune restauratrice inscrite</p></div>';
 
     // Commandes du jour
     document.getElementById('admin-choices-count').textContent = todayChoices.length;
@@ -893,7 +1275,7 @@ async function loadAdminDashboard() {
       ? todayChoices.map((c, i) => {
           const f       = findFood(c.food);
           const entName = enterprises.find(e => e.id === c.enterpriseId)?.companyName || '';
-          return `<div class="choice-card" style="animation-delay:${i * 0.04}s">
+          return `<div class="choice-card admin-choice-card" style="animation-delay:${i * 0.04}s">
             <div class="cc-head">
               <div class="cc-av">${initials(c.userName)}</div>
               <div>
@@ -903,9 +1285,17 @@ async function loadAdminDashboard() {
             </div>
             <div class="cc-food">${f.emoji} ${esc(f.label)}</div>
             ${c.food === 'Autres' && c.customFood ? `<div class="cc-custom">${esc(c.customFood)}</div>` : ''}
+            <div class="admin-choice-actions">
+              <button class="aia-btn aia-edit" title="Modifier" onclick="openAdminChoiceModal('${c.id}')">
+                <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zm-2.207 2.207L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
+              </button>
+              <button class="aia-btn aia-del" title="Supprimer" onclick="adminDeleteChoice('${c.id}')">
+                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+              </button>
+            </div>
           </div>`;
         }).join('')
-      : '<div class="empty-grid"><div class="eg-icon">🍽️</div><p>Aucune commande aujourd\'hui</p></div>';
+      : '<div class="empty-grid"><div class="eg-icon"><i class="ph-thin ph-bowl-food"></i></div><p>Aucune commande aujourd\'hui</p></div>';
 
     // Historique global
     document.getElementById('admin-history-list').innerHTML = history.length
@@ -921,10 +1311,10 @@ async function loadAdminDashboard() {
             <div>
               <div class="hi-food-name">${f.emoji} ${esc(f.label)}</div>
               <div style="font-size:.78rem;color:var(--ink4);margin-top:2px">
-                👤 ${esc(c.userName)} ${entName ? `—  ${esc(entName)}` : ''}
+                <i class="ph-bold ph-user"></i> ${esc(c.userName)} ${entName ? `—  ${esc(entName)}` : ''}
               </div>
             </div>
-            <span class="hi-st ${c.orderLaunched ? 'ok' : 'wait'}">${c.orderLaunched ? '✅' : '⏳'}</span>
+            <span class="hi-st ${c.orderLaunched ? 'ok' : 'wait'}">${c.orderLaunched ? '<i class="ph-fill ph-check-circle"></i>' : '<i class="ph-fill ph-hourglass-medium"></i>'}</span>
           </div>`;
         }).join('')
       : '<div class="empty-hist"><p>Aucun historique</p></div>';
@@ -1054,7 +1444,14 @@ async function api(url, method = 'GET', body) {
   if (token) opts.headers['Authorization'] = `Bearer ${token}`;
   if (body)  opts.body = JSON.stringify(body);
   const res  = await fetch(url, opts);
-  const data = await res.json();
+  const ct   = res.headers.get('content-type') || '';
+  let data;
+  if (ct.includes('application/json')) {
+    data = await res.json();
+  } else {
+    const text = await res.text();
+    data = { error: text.startsWith('<!') ? `Erreur serveur (${res.status})` : (text || `Erreur ${res.status}`) };
+  }
   if (!res.ok) { const e = new Error(data.error || 'Erreur serveur'); e.status = res.status; throw e; }
   return data;
 }
@@ -1072,10 +1469,11 @@ function esc(s) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-function showErr(id, msg)  { const e = document.getElementById(id); if (e) { e.textContent = msg; e.classList.remove('hidden'); } }
-function clearErr(id)      { const e = document.getElementById(id); if (e) e.classList.add('hidden'); }
-function setModalErr(msg)  { const e = document.getElementById('modal-error');     e.textContent = msg; e.classList.remove('hidden'); }
-function setEmpModalErr(m) { const e = document.getElementById('emp-modal-error'); e.textContent = m;   e.classList.remove('hidden'); }
+function showErr(id, msg)    { const e = document.getElementById(id); if (e) { e.textContent = msg; e.classList.remove('hidden'); } }
+function clearErr(id)        { const e = document.getElementById(id); if (e) e.classList.add('hidden'); }
+function setModalErr(msg)    { const e = document.getElementById('modal-error');       e.textContent = msg; e.classList.remove('hidden'); }
+function setEmpModalErr(m)   { const e = document.getElementById('emp-modal-error');   e.textContent = m;   e.classList.remove('hidden'); }
+function setRestoModalErr(m) { const e = document.getElementById('resto-modal-error'); e.textContent = m;   e.classList.remove('hidden'); }
 
 // Affiche une notification toast (ok=vert | err=rouge | info=bleu)
 function toast(msg, type = 'info') {
@@ -1084,6 +1482,169 @@ function toast(msg, type = 'info') {
   t.className   = `toast t-${type} visible`;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove('visible'), 3500);
+}
+
+// ════════════════════════════════════════════════════════════════
+//  ADMIN — RENOMMER UN UTILISATEUR
+// ════════════════════════════════════════════════════════════════
+
+let adminRenameCtx = { type: null, id: null };
+let adminChoiceCtx = { id: null, selectedFood: null };
+
+function openAdminRenameModal(type, id) {
+  adminRenameCtx = { type, id };
+  let currentName = '', domain = '';
+  if (type === 'enterprise') {
+    const ent = adminData.enterprises.find(e => e.id === id);
+    currentName = ent?.companyName || '';
+    domain      = ent?.domain      || '';
+  } else if (type === 'employee') {
+    currentName = adminData.employees.find(e => e.id === id)?.fullName || '';
+  } else if (type === 'restauratrice') {
+    currentName = adminData.restos.find(r => r.id === id)?.fullName || '';
+  }
+
+  const titles = { enterprise: 'Renommer l\'entreprise', employee: 'Renommer l\'employé', restauratrice: 'Renommer la restauratrice' };
+  document.getElementById('admin-rename-title').textContent      = titles[type] || 'Renommer';
+  document.getElementById('admin-rename-sub').textContent        = `Actuellement : ${currentName}`;
+  document.getElementById('admin-rename-label').textContent      = type === 'enterprise' ? 'Nouveau nom de l\'entreprise' : 'Nouveau nom complet';
+  document.getElementById('admin-rename-input').value            = currentName;
+  document.getElementById('admin-rename-error').classList.add('hidden');
+
+  const domainField = document.getElementById('admin-rename-domain-field');
+  if (type === 'enterprise') {
+    domainField.classList.remove('hidden');
+    document.getElementById('admin-rename-domain').value = domain;
+  } else {
+    domainField.classList.add('hidden');
+  }
+  document.getElementById('admin-rename-modal').classList.remove('hidden');
+}
+
+function closeAdminRenameModal() {
+  document.getElementById('admin-rename-modal').classList.add('hidden');
+}
+
+async function submitAdminRename() {
+  const { type, id } = adminRenameCtx;
+  const newName = document.getElementById('admin-rename-input').value.trim();
+  const errEl   = document.getElementById('admin-rename-error');
+  if (!newName) { errEl.textContent = 'Le nom ne peut pas être vide.'; errEl.classList.remove('hidden'); return; }
+
+  const body = { newName };
+  if (type === 'enterprise') {
+    const domain = document.getElementById('admin-rename-domain').value.trim();
+    if (domain) body.newDomain = domain;
+  }
+
+  try {
+    await api(`/api/admin/users/${type}/${id}`, 'PATCH', body);
+    closeAdminRenameModal();
+    toast('Nom mis à jour !', 'ok');
+    loadAdminDashboard();
+  } catch (err) {
+    errEl.textContent = err.message || 'Erreur lors de la mise à jour.';
+    errEl.classList.remove('hidden');
+  }
+}
+
+async function adminDeleteUser(type, id) {
+  let name = '';
+  if (type === 'enterprise')   name = adminData.enterprises.find(e => e.id === id)?.companyName || id;
+  else if (type === 'employee') name = adminData.employees.find(e => e.id === id)?.fullName || id;
+  else if (type === 'restauratrice') name = adminData.restos.find(r => r.id === id)?.fullName || id;
+
+  const labels = {
+    enterprise:   `l'entreprise "${name}" et toutes ses données (employés, restauratrices, commandes)`,
+    employee:     `l'employé "${name}"`,
+    restauratrice:`la restauratrice "${name}"`,
+  };
+  if (!confirm(`Supprimer ${labels[type] || name} ?\nCette action est irréversible.`)) return;
+
+  try {
+    await api(`/api/admin/users/${type}/${id}`, 'DELETE');
+    toast('Supprimé avec succès.', 'ok');
+    loadAdminDashboard();
+  } catch (err) {
+    toast(err.message || 'Erreur lors de la suppression.', 'err');
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  ADMIN — MODIFIER / SUPPRIMER UNE COMMANDE
+// ════════════════════════════════════════════════════════════════
+
+function openAdminChoiceModal(choiceId) {
+  const c = adminData.choices.find(ch => ch.id === choiceId);
+  if (!c) return;
+  adminChoiceCtx = { id: choiceId, selectedFood: c.food };
+
+  document.getElementById('admin-choice-sub').textContent = `Commande de ${c.userName}`;
+  document.getElementById('admin-choice-food-grid').innerHTML = FOODS.map(f => `
+    <div class="food-opt${f.id === c.food ? ' sel' : ''}${f.id === 'Autres' ? ' autres-opt' : ''}"
+         onclick="selectAdminChoiceFood('${f.id}',this)">
+      <span class="fo-em">${f.emoji}</span><span>${f.label}</span>
+    </div>`).join('');
+
+  const customWrap = document.getElementById('admin-choice-custom');
+  if (c.food === 'Autres') {
+    customWrap.classList.remove('hidden');
+    document.getElementById('admin-choice-custom-input').value = c.customFood || '';
+  } else {
+    customWrap.classList.add('hidden');
+    document.getElementById('admin-choice-custom-input').value = '';
+  }
+  document.getElementById('admin-choice-error').classList.add('hidden');
+  document.getElementById('admin-choice-modal').classList.remove('hidden');
+}
+
+function selectAdminChoiceFood(foodId, el) {
+  adminChoiceCtx.selectedFood = foodId;
+  document.querySelectorAll('#admin-choice-food-grid .food-opt').forEach(o => o.classList.remove('sel'));
+  el.classList.add('sel');
+  const customWrap = document.getElementById('admin-choice-custom');
+  if (foodId === 'Autres') {
+    customWrap.classList.remove('hidden');
+  } else {
+    customWrap.classList.add('hidden');
+    document.getElementById('admin-choice-custom-input').value = '';
+  }
+}
+
+function closeAdminChoiceModal() {
+  document.getElementById('admin-choice-modal').classList.add('hidden');
+}
+
+async function submitAdminChoice() {
+  const { id, selectedFood } = adminChoiceCtx;
+  const errEl = document.getElementById('admin-choice-error');
+  if (!selectedFood) { errEl.textContent = 'Veuillez choisir un repas.'; errEl.classList.remove('hidden'); return; }
+
+  const body = { food: selectedFood };
+  if (selectedFood === 'Autres') {
+    body.customFood = document.getElementById('admin-choice-custom-input').value.trim();
+  }
+  try {
+    await api(`/api/admin/choices/${id}`, 'PATCH', body);
+    closeAdminChoiceModal();
+    toast('Commande modifiée !', 'ok');
+    loadAdminDashboard();
+  } catch (err) {
+    errEl.textContent = err.message || 'Erreur lors de la modification.';
+    errEl.classList.remove('hidden');
+  }
+}
+
+async function adminDeleteChoice(choiceId) {
+  const c = adminData.choices.find(ch => ch.id === choiceId);
+  if (!confirm(`Supprimer la commande de "${c?.userName || choiceId}" ?\nCette action est irréversible.`)) return;
+  try {
+    await api(`/api/admin/choices/${choiceId}`, 'DELETE');
+    toast('Commande supprimée.', 'ok');
+    loadAdminDashboard();
+  } catch (err) {
+    toast(err.message || 'Erreur lors de la suppression.', 'err');
+  }
 }
 
 // Toggle visibilité du mot de passe

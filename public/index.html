@@ -9,18 +9,16 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <link rel="stylesheet" href="style.css" />
+  <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
 </head>
 <body>
 
 <!--ÉCRAN 1 — LANDING PAGE-->
 <div id="landing-screen" class="screen active">
 
-  <!-- NAVBAR -->
   <header class="land-nav">
     <div class="land-nav-brand">
-      <div class="land-nav-icon-wrap">
-        <span>🍽️</span>
-      </div>
+      <div class="land-nav-icon-wrap"><i class="ph-fill ph-fork-knife"></i></div>
       <span class="land-nav-title">LunchApp</span>
     </div>
     <nav class="land-nav-links">
@@ -29,17 +27,13 @@
     </nav>
     <div class="land-nav-actions">
       <button class="btn-outline-nav" onclick="goToLogin()">Connexion</button>
-      <button class="btn-cta-nav" onclick="goToRegisterEnterprise()">
-        Commencer gratuitement
-      </button>
+      <button class="btn-cta-nav" onclick="goToRegisterEnterprise()">Commencer gratuitement</button>
     </div>
-    <!-- Hamburger mobile -->
     <button class="hamburger" id="hamburger" onclick="toggleMenu()" aria-label="Menu">
       <span></span><span></span><span></span>
     </button>
   </header>
 
-  <!-- Menu mobile -->
   <div class="mobile-menu hidden" id="mobile-menu">
     <a href="#features" class="mob-link" onclick="toggleMenu()">Fonctionnalités</a>
     <a href="#how" class="mob-link" onclick="toggleMenu()">Comment ça marche</a>
@@ -47,9 +41,7 @@
     <button class="mob-btn-start" onclick="goToRegisterEnterprise(); toggleMenu()">Commencer gratuitement</button>
   </div>
 
-  <!-- HERO -->
   <section class="hero">
-    <!-- Fond animé -->
     <div class="hero-canvas">
       <div class="hc-orb hc-orb-1"></div>
       <div class="hc-orb hc-orb-2"></div>
@@ -58,25 +50,21 @@
     </div>
 
     <div class="hero-body">
-      <!-- Colonne gauche -->
       <div class="hero-left">
         <div class="hero-pill">
           <span class="hero-pill-dot"></span>
           <span>Nouveau — Messagerie intégrée disponible</span>
         </div>
-
         <h1 class="hero-h1">
           Les repas de votre<br/>
           <span class="hero-h1-grad">entreprise</span><br/>
           sans effort
         </h1>
-
         <p class="hero-desc">
           Collectez les choix de repas de vos employés, gérez
           les commandes journalières et coordonnez-vous avec
           la restauratrice — en un seul endroit.
         </p>
-
         <div class="hero-actions">
           <button class="btn-hero-main" onclick="goToRegisterEnterprise()">
             <span>Créer mon compte entreprise</span>
@@ -87,17 +75,10 @@
             <span>Déjà inscrit ? Connexion</span>
           </button>
         </div>
-
-        
       </div>
-
-      
     </div>
-
-    
   </section>
 
-  <!-- FONCTIONNALITÉS -->
   <section class="features-section" id="features">
     <div class="fs-inner">
       <div class="fs-header">
@@ -105,22 +86,19 @@
         <h2 class="fs-title">Tout ce dont vous avez besoin</h2>
         <p class="fs-sub">Une plateforme complète pour organiser les repas de midi de votre équipe sans friction.</p>
       </div>
-
       <div class="features-grid">
-
         <div class="feat-card feat-card-big">
-          <div class="feat-card-icon" style="background:linear-gradient(135deg,var(--o1),var(--o2))"></div>
+          <div class="feat-card-icon" style="background:linear-gradient(135deg,var(--o1),var(--o2))"><i class="ph-fill ph-buildings"></i></div>
           <h3>Gestion d'entreprise</h3>
-          <p>Créez votre compte entreprise et gérez les comptes de tous vos employés depuis un tableau de bord central et intuitif.</p>
+          <p>Créez votre compte entreprise, créez les comptes de vos employés et gérez les commandes depuis un tableau de bord central.</p>
           <div class="feat-tags">
             <span class="feat-tag">Tableau de bord</span>
             <span class="feat-tag">Multi-employés</span>
             <span class="feat-tag">Historique</span>
           </div>
         </div>
-
         <div class="feat-card">
-          <div class="feat-card-icon" style="background:linear-gradient(135deg,var(--s1),var(--s2))">🍴</div>
+          <div class="feat-card-icon" style="background:linear-gradient(135deg,var(--s1),var(--s2))"><i class="ph-fill ph-fork-knife"></i></div>
           <h3>Choix de repas</h3>
           <p>9 plats disponibles. Les employés peuvent modifier leur choix pendant 5 minutes après validation.</p>
           <div class="feat-tags">
@@ -128,9 +106,8 @@
             <span class="feat-tag">Temps réel</span>
           </div>
         </div>
-
         <div class="feat-card">
-          <div class="feat-card-icon" style="background:linear-gradient(135deg,#8B5CF6,#A78BFA)">💬</div>
+          <div class="feat-card-icon" style="background:linear-gradient(135deg,#8B5CF6,#A78BFA)"><i class="ph-fill ph-chat-circle-dots"></i></div>
           <h3>Messagerie intégrée</h3>
           <p>Échangez directement avec la restauratrice depuis l'application. Notifications en temps réel.</p>
           <div class="feat-tags">
@@ -138,9 +115,8 @@
             <span class="feat-tag">Notifications</span>
           </div>
         </div>
-
         <div class="feat-card">
-          <div class="feat-card-icon" style="background:linear-gradient(135deg,#22C55E,#16A34A)">📄</div>
+          <div class="feat-card-icon" style="background:linear-gradient(135deg,#22C55E,#16A34A)"><i class="ph-fill ph-file-pdf"></i></div>
           <h3>Export PDF</h3>
           <p>Téléchargez la liste complète des commandes en PDF formaté pour la transmettre à la restauratrice.</p>
           <div class="feat-tags">
@@ -148,9 +124,8 @@
             <span class="feat-tag">Un clic</span>
           </div>
         </div>
-
         <div class="feat-card feat-card-big feat-card-dark">
-          <div class="feat-card-icon feat-icon-white">⏱️</div>
+          <div class="feat-card-icon feat-icon-white"><i class="ph-fill ph-timer"></i></div>
           <h3>Verrouillage intelligent</h3>
           <p>Chaque choix peut être modifié ou supprimé dans les 5 minutes suivant la saisie. Passé ce délai, le choix est définitivement enregistré pour garantir l'organisation des commandes.</p>
           <div class="feat-tags">
@@ -159,12 +134,10 @@
             <span class="feat-tag feat-tag-white">Automatique</span>
           </div>
         </div>
-
       </div>
     </div>
   </section>
 
-  <!-- COMMENT ÇA MARCHE -->
   <section class="how-section" id="how">
     <div class="how-inner">
       <div class="fs-header">
@@ -172,25 +145,24 @@
         <h2 class="fs-title">Comment ça marche ?</h2>
         <p class="fs-sub">Démarrez en 3 étapes simples et organisez vos repas dès aujourd'hui.</p>
       </div>
-
       <div class="steps-grid">
         <div class="step-card">
           <div class="step-num">01</div>
-          <div class="step-icon"></div>
+          <div class="step-icon"><i class="ph-fill ph-buildings"></i></div>
           <h3>L'entreprise crée son compte</h3>
-          <p>Inscrivez votre entreprise en quelques secondes, puis créez les comptes de vos employés avec nom et mot de passe.</p>
+          <p>Inscrivez votre entreprise, puis créez les comptes de vos employés avec leur nom complet et mot de passe.</p>
         </div>
         <div class="step-arrow">→</div>
         <div class="step-card">
           <div class="step-num">02</div>
-          <div class="step-icon"></div>
+          <div class="step-icon"><i class="ph-fill ph-bowl-food"></i></div>
           <h3>Les employés choisissent</h3>
-          <p>Chaque jour, les employés se connectent et choisissent leur repas parmi les 9 plats disponibles.</p>
+          <p>Chaque jour, les employés se connectent avec leurs identifiants et choisissent leur repas parmi les 9 plats disponibles.</p>
         </div>
         <div class="step-arrow">→</div>
         <div class="step-card">
           <div class="step-num">03</div>
-          <div class="step-icon"></div>
+          <div class="step-icon"><i class="ph-fill ph-rocket-launch"></i></div>
           <h3>La commande est lancée</h3>
           <p>Le chargé de commande valide, télécharge le PDF et transmet à la restauratrice. Simple et efficace.</p>
         </div>
@@ -198,7 +170,6 @@
     </div>
   </section>
 
-  <!-- CTA FINAL -->
   <section class="cta-section">
     <div class="cta-bg">
       <div class="cta-orb-1"></div>
@@ -208,21 +179,16 @@
       <h2 class="cta-title">Prêt à simplifier vos repas ?</h2>
       <p class="cta-sub">Créez votre compte entreprise gratuitement et commencez dès aujourd'hui.</p>
       <div class="cta-actions">
-        <button class="btn-cta-big" onclick="goToRegisterEnterprise()">
-           Créer mon compte entreprise
-        </button>
-        <button class="btn-cta-ghost" onclick="goToLogin()">
-          Se connecter →
-        </button>
+        <button class="btn-cta-big" onclick="goToRegisterEnterprise()"><i class="ph-bold ph-buildings"></i> Créer mon compte entreprise</button>
+        <button class="btn-cta-ghost" onclick="goToLogin()">Se connecter →</button>
       </div>
     </div>
   </section>
 
-  <!-- FOOTER -->
   <footer class="land-footer">
     <div class="lf-inner">
       <div class="lf-brand">
-        <span>🍽️</span>
+        <span><i class="ph-fill ph-fork-knife"></i></span>
         <span class="lf-name">LunchApp</span>
       </div>
       <p class="lf-copy">© 2026 LunchApp — Votre repas du midi, organisé ensemble.</p>
@@ -234,7 +200,6 @@
   </footer>
 
 </div>
-<!-- fin landing-screen -->
 
 <!--ÉCRAN 2 — AUTHENTIFICATION-->
 <div id="auth-screen" class="screen">
@@ -242,31 +207,23 @@
     <div class="abd-blob ab1"></div>
     <div class="abd-blob ab2"></div>
   </div>
-
   <div class="auth-wrapper">
-    <button class="auth-back-btn" onclick="showScreen('landing-screen')">
-      ← Retour à l'accueil
-    </button>
+    <button class="auth-back-btn" onclick="showScreen('landing-screen')">← Retour à l'accueil</button>
 
     <!-- CONNEXION -->
     <div id="panel-login" class="auth-panel">
       <div class="auth-panel-header">
-        <div class="auth-panel-logo">🍽️</div>
+        <div class="auth-panel-logo"><i class="ph-fill ph-fork-knife"></i></div>
         <h2>Connexion</h2>
         <p>Accédez à votre espace LunchApp</p>
       </div>
-
       <div class="login-type-selector">
-        <button class="lts-btn active" data-type="employee" onclick="setLoginType('employee', this)"> Employé</button>
-        <button class="lts-btn" data-type="enterprise" onclick="setLoginType('enterprise', this)"> Entreprise</button>
-        <button class="lts-btn" data-type="restauratrice" onclick="setLoginType('restauratrice', this)"> Resto.</button>
-        <button class="lts-btn" data-type="superadmin" onclick="setLoginType('superadmin', this)"> Admin</button>
+        <button class="lts-btn active" data-type="employee" onclick="setLoginType('employee', this)"><i class="ph-bold ph-user"></i><span>Employé</span></button>
+        <button class="lts-btn" data-type="enterprise" onclick="setLoginType('enterprise', this)"><i class="ph-bold ph-buildings"></i><span>Entreprise</span></button>
+        <button class="lts-btn" data-type="restauratrice" onclick="setLoginType('restauratrice', this)"><i class="ph-bold ph-chef-hat"></i><span>Resto.</span></button>
+        <button class="lts-btn" data-type="superadmin" onclick="setLoginType('superadmin', this)"><i class="ph-bold ph-crown-simple"></i><span>Admin</span></button>
       </div>
-
-      <div class="login-type-hint" id="login-type-hint">
-        Connectez-vous avec votre nom et mot de passe
-      </div>
-
+      <div class="login-type-hint" id="login-type-hint">Connectez-vous avec votre nom et mot de passe</div>
       <form id="login-form" onsubmit="handleLogin(event)">
         <div class="field">
           <label id="login-identifier-label">Votre nom complet</label>
@@ -291,25 +248,19 @@
           <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
         </button>
       </form>
-
       <div class="auth-switch-link">
         Pas encore de compte ?
         <button onclick="showAuthPanel('panel-register-enterprise')">Créer un compte entreprise</button>
-      </div>
-      <div class="auth-switch-link" style="margin-top:4px">
-        Restauratrice ?
-        <button onclick="showAuthPanel('panel-register-restauratrice')">Créer votre compte</button>
       </div>
     </div>
 
     <!-- INSCRIPTION ENTREPRISE -->
     <div id="panel-register-enterprise" class="auth-panel hidden">
       <div class="auth-panel-header">
-        <div class="auth-panel-logo"></div>
+        <div class="auth-panel-logo apl-blue"><i class="ph-fill ph-buildings"></i></div>
         <h2>Compte Entreprise</h2>
         <p>Créez votre espace de gestion des repas</p>
       </div>
-
       <form id="register-enterprise-form" onsubmit="handleRegisterEnterprise(event)">
         <div class="field">
           <label>Nom de l'entreprise</label>
@@ -339,7 +290,11 @@
             <span class="pwd-strength-label" id="pwd-strength-label"></span>
           </div>
           <div class="pwd-rules" id="pwd-rules">
-            
+            <div class="pwd-rule" id="rule-len">○ 8 caractères minimum</div>
+            <div class="pwd-rule" id="rule-upper">○ Une lettre majuscule</div>
+            <div class="pwd-rule" id="rule-lower">○ Une lettre minuscule</div>
+            <div class="pwd-rule" id="rule-num">○ Un chiffre</div>
+            <div class="pwd-rule" id="rule-special">○ Un caractère spécial</div>
           </div>
         </div>
         <div id="register-ent-error" class="form-error hidden"></div>
@@ -356,11 +311,10 @@
     <!-- INSCRIPTION RESTAURATRICE -->
     <div id="panel-register-restauratrice" class="auth-panel hidden">
       <div class="auth-panel-header">
-        <div class="auth-panel-logo">👩‍🍳</div>
+        <div class="auth-panel-logo apl-green"><i class="ph-fill ph-chef-hat"></i></div>
         <h2>Compte Restauratrice</h2>
         <p>Gérez et suivez les commandes des entreprises</p>
       </div>
-
       <form id="register-resto-form" onsubmit="handleRegisterRestauratrice(event)">
         <div class="field">
           <label>Votre nom complet</label>
@@ -389,30 +343,42 @@
         <button onclick="showAuthPanel('panel-login')">← Retour à la connexion</button>
       </div>
     </div>
-
   </div>
 </div>
-<!-- fin auth-screen -->
 
 <!--ÉCRAN 3 — APPLICATION-->
 <div id="app-screen" class="screen">
 
   <nav class="topnav">
     <div class="nav-brand">
-      <span class="nav-logo">🍽️</span>
+      <span class="nav-logo"><i class="ph-fill ph-fork-knife"></i></span>
       <span class="nav-title">LunchApp</span>
     </div>
     <div class="nav-center">
       <div class="nav-date" id="nav-date"></div>
     </div>
     <div class="nav-end">
+
+      <!-- Messagerie (entreprise + restauratrice) -->
       <button class="nav-icon-btn hidden" id="nav-msg-btn" onclick="showSection('messages')" title="Messagerie">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
         <span class="notif-dot hidden" id="msg-notif-dot"></span>
       </button>
+
+      <!-- Historique (employé) -->
       <button class="nav-icon-btn hidden" id="nav-history-btn" onclick="showSection('history')" title="Historique">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
       </button>
+
+      <!-- ✅ CORRECTION : Bouton Employés (entreprise) — visible sur desktop -->
+      <button class="nav-icon-btn hidden" id="nav-emp-btn" onclick="showSection('employees')" title="Gérer les employés">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>
+        </svg>
+      </button>
+
       <div class="nav-user">
         <div class="nav-avatar" id="nav-avatar"></div>
         <div class="nav-user-info">
@@ -420,6 +386,7 @@
           <span class="nav-role-badge" id="nav-role-badge"></span>
         </div>
       </div>
+
       <button class="nav-logout" onclick="logout()" title="Déconnexion">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
         <span class="nav-logout-label">Déconnexion</span>
@@ -434,7 +401,7 @@
     <div class="page-inner">
       <div class="card" id="card-my-choice">
         <div class="card-head">
-          <div class="card-title"><span class="card-icon">🍴</span><h2>Mon repas du jour</h2></div>
+          <div class="card-title"><span class="card-icon ci-orange"><i class="ph-bold ph-fork-knife"></i></span><h2>Mon repas du jour</h2></div>
           <div id="order-badge"></div>
         </div>
         <div class="card-body">
@@ -462,7 +429,7 @@
           </div>
           <div id="my-choice-empty">
             <div class="empty-prompt">
-              <div class="empty-prompt-icon">🤔</div>
+              <div class="empty-prompt-icon"><i class="ph-thin ph-bowl-food"></i></div>
               <p>Pas encore de choix pour aujourd'hui</p>
               <button class="btn-choose" onclick="openChoiceModal()">Choisir mon repas</button>
             </div>
@@ -474,21 +441,39 @@
         <div class="admin-card">
           <div class="admin-card-top">
             <div class="admin-label">
-              <span></span>
+              <span><i class="ph-fill ph-buildings"></i></span>
               <div>
                 <h3 id="enterprise-panel-title">Tableau de bord</h3>
                 <p id="enterprise-subtitle">Chargement...</p>
               </div>
             </div>
             <div class="admin-btns">
-              <button class="btn-pdf" onclick="downloadPDF()">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                PDF
-              </button>
-              <button class="btn-launch" id="launch-btn" onclick="launchOrder()">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                Lancer la commande
-              </button>
+              <div class="admin-btns-group">
+                <button class="btn-emp-panel" onclick="showSection('employees')">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+                    <circle cx="9" cy="7" r="4"/>
+                    <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>
+                  </svg>
+                  Employés
+                </button>
+                <button class="btn-resto-panel" onclick="openAddRestoModal()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+                  </svg>
+                  + Restauratrice
+                </button>
+              </div>
+              <div class="admin-btns-group">
+                <button class="btn-pdf" onclick="downloadPDF()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                  PDF
+                </button>
+                <button class="btn-launch" id="launch-btn" onclick="launchOrder()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                  Lancer la commande
+                </button>
+              </div>
             </div>
           </div>
           <div class="dish-counts" id="dish-counts"></div>
@@ -499,7 +484,7 @@
         <div class="resto-card">
           <div class="resto-card-top">
             <div class="resto-label">
-              <span></span>
+              <span><i class="ph-fill ph-chef-hat"></i></span>
               <div>
                 <h3>Vue restauratrice</h3>
                 <p id="resto-subtitle">Commandes du jour</p>
@@ -513,7 +498,7 @@
 
       <div class="card">
         <div class="card-head">
-          <div class="card-title"><span class="card-icon">👥</span><h2>Repas de l'équipe</h2></div>
+          <div class="card-title"><span class="card-icon ci-blue"><i class="ph-bold ph-users-three"></i></span><h2>Repas de l'équipe</h2></div>
           <span class="pill-count" id="team-count">0 choix</span>
         </div>
         <div class="card-body">
@@ -530,11 +515,36 @@
     <div class="page-inner">
       <div class="card">
         <div class="card-head">
-          <div class="card-title"><span class="card-icon">👥</span><h2>Gestion des employés</h2></div>
-          <button class="btn-add-employee" onclick="openAddEmployeeModal()">+ Ajouter un employé</button>
+          <div class="card-title"><span class="card-icon ci-blue"><i class="ph-bold ph-users"></i></span><h2>Gestion des employés</h2></div>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <button class="btn-add-employee" onclick="openAddEmployeeModal()">
+              <svg viewBox="0 0 20 20" fill="currentColor" style="width:16px;height:16px"><path d="M8 9a3 3 0 100-6 3 3 0 000 6zM8 11a6 6 0 016 6H2a6 6 0 016-6zM16 7a1 1 0 10-2 0v1h-1a1 1 0 100 2h1v1a1 1 0 102 0v-1h1a1 1 0 100-2h-1V7z"/></svg>
+              Ajouter un employé
+            </button>
+            <button class="btn-back" onclick="showSection('today')">← Retour</button>
+          </div>
         </div>
         <div class="card-body">
-          <div id="employees-list" class="employees-list"><div class="skeleton-state">Chargement...</div></div>
+          <!-- Info guide -->
+          <div class="emp-guide">
+            <div class="eg-step">
+              <span class="eg-num">1</span>
+              <span>Cliquez <strong>"Ajouter un employé"</strong></span>
+            </div>
+            <div class="eg-arrow">→</div>
+            <div class="eg-step">
+              <span class="eg-num">2</span>
+              <span>Saisissez le <strong>nom complet</strong> et le <strong>mot de passe</strong></span>
+            </div>
+            <div class="eg-arrow">→</div>
+            <div class="eg-step">
+              <span class="eg-num">3</span>
+              <span>L'employé se connecte avec ces identifiants</span>
+            </div>
+          </div>
+          <div id="employees-list" class="employees-list">
+            <div class="skeleton-state">Chargement...</div>
+          </div>
         </div>
       </div>
     </div>
@@ -545,7 +555,7 @@
     <div class="page-inner">
       <div class="card">
         <div class="card-head">
-          <div class="card-title"><span class="card-icon">🕐</span><h2>Mon historique</h2></div>
+          <div class="card-title"><span class="card-icon ci-orange"><i class="ph-bold ph-clock-countdown"></i></span><h2>Mon historique</h2></div>
           <button class="btn-back" onclick="showSection('today')">← Retour</button>
         </div>
         <div class="card-body">
@@ -560,21 +570,71 @@
     <div class="page-inner">
       <div class="card chat-card">
         <div class="card-head">
-          <div class="card-title"><span class="card-icon"></span><h2>Messagerie</h2></div>
+          <div class="card-title"><span class="card-icon ci-purple"><i class="ph-bold ph-chat-circle-dots"></i></span><h2>Messagerie</h2></div>
           <div class="chat-participants">
-            <span class="chat-part admin-part"> Entreprise</span>
+            <span class="chat-part admin-part"><i class="ph-bold ph-buildings"></i> Entreprise</span>
             <span class="chat-arrow">⇄</span>
-            <span class="chat-part resto-part"> Restauratrice</span>
+            <span class="chat-part resto-part"><i class="ph-bold ph-chef-hat"></i> Restauratrice</span>
           </div>
           <button class="btn-back" onclick="showSection('today')">← Retour</button>
         </div>
         <div id="chat-wrapper">
           <div class="chat-messages" id="chat-messages"><div class="skeleton-state">Chargement...</div></div>
+
           <div class="chat-composer">
-            <textarea id="chat-input" placeholder="Écrire un message..." rows="1" onkeydown="chatKeydown(event)"></textarea>
-            <button class="chat-send-btn" onclick="sendMessage()">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
-            </button>
+
+            <!-- Zone enregistrement audio (masquée par défaut) -->
+            <div id="audio-record-zone" class="audio-record-zone hidden">
+
+              <!-- État : en cours d'enregistrement -->
+              <div id="arc-recording-state" class="arc-state">
+                <div class="arc-indicator">
+                  <span class="arc-dot"></span>
+                  <span class="arc-rec-label">Enregistrement…</span>
+                  <span id="arc-timer" class="arc-timer">0:00</span>
+                </div>
+                <button class="arc-stop-btn" onclick="stopRecording()">
+                  <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
+                  Arrêter
+                </button>
+              </div>
+
+              <!-- État : aperçu avant envoi -->
+              <div id="arc-preview-state" class="arc-state hidden">
+                <div class="arc-preview-wrap">
+                  <span class="arc-preview-icon"><i class="ph-fill ph-microphone"></i></span>
+                  <audio id="arc-preview-player" controls class="arc-preview-player"></audio>
+                </div>
+                <div class="arc-preview-btns">
+                  <button class="arc-cancel-btn" onclick="cancelAudio()">
+                    <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+                    Annuler
+                  </button>
+                  <button id="arc-send-audio-btn" class="arc-send-btn" onclick="sendAudioMessage()">
+                    <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                    Envoyer
+                  </button>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- Compositeur texte (affiché par défaut) -->
+            <div id="text-composer" class="text-composer-inner">
+              <textarea id="chat-input" placeholder="Écrire un message…" rows="1" onkeydown="chatKeydown(event)"></textarea>
+              <button class="chat-mic-btn" onclick="startRecording()" title="Message vocal">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                  <line x1="12" y1="19" x2="12" y2="23"/>
+                  <line x1="8" y1="23" x2="16" y2="23"/>
+                </svg>
+              </button>
+              <button class="chat-send-btn" onclick="sendMessage()">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+              </button>
+            </div>
+
           </div>
         </div>
       </div>
@@ -587,7 +647,7 @@
       <div class="admin-stats-grid" id="admin-stats-grid"></div>
       <div class="card">
         <div class="card-head">
-          <div class="card-title"><span class="card-icon"></span><h2>Entreprises inscrites</h2></div>
+          <div class="card-title"><span class="card-icon ci-orange"><i class="ph-bold ph-buildings"></i></span><h2>Entreprises inscrites</h2></div>
           <span class="pill-count" id="admin-ent-count">0</span>
         </div>
         <div class="card-body">
@@ -596,7 +656,25 @@
       </div>
       <div class="card">
         <div class="card-head">
-          <div class="card-title"><span class="card-icon">🍽️</span><h2>Commandes du jour</h2></div>
+          <div class="card-title"><span class="card-icon ci-blue"><i class="ph-bold ph-users"></i></span><h2>Employés</h2></div>
+          <span class="pill-count" id="admin-emp-count">0</span>
+        </div>
+        <div class="card-body">
+          <div id="admin-employees-list" class="admin-list"><div class="skeleton-state">Chargement...</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span class="card-icon ci-green"><i class="ph-bold ph-chef-hat"></i></span><h2>Restauratrices</h2></div>
+          <span class="pill-count" id="admin-restos-count">0</span>
+        </div>
+        <div class="card-body">
+          <div id="admin-restos-list" class="admin-list"><div class="skeleton-state">Chargement...</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><span class="card-icon ci-orange"><i class="ph-bold ph-fork-knife"></i></span><h2>Commandes du jour</h2></div>
           <span class="pill-count" id="admin-choices-count">0</span>
         </div>
         <div class="card-body">
@@ -605,7 +683,7 @@
       </div>
       <div class="card">
         <div class="card-head">
-          <div class="card-title"><span class="card-icon">📋</span><h2>Historique global</h2></div>
+          <div class="card-title"><span class="card-icon ci-blue"><i class="ph-bold ph-clipboard-text"></i></span><h2>Historique global</h2></div>
         </div>
         <div class="card-body">
           <div id="admin-history-list" class="history-list"><div class="skeleton-state">Chargement...</div></div>
@@ -615,7 +693,6 @@
   </section>
 
 </div>
-<!-- fin app-screen -->
 
 <!-- MODAL REPAS -->
 <div id="food-modal" class="modal-backdrop hidden" onclick="backdropClose(event,'food-modal')">
@@ -649,14 +726,22 @@
   <div class="modal">
     <div class="modal-top">
       <div>
-        <h3>Ajouter un employé</h3>
-        <p class="modal-sub">Créez un compte pour votre employé</p>
+        <h3>Créer un compte employé</h3>
+        <p class="modal-sub">L'employé utilisera ces identifiants pour se connecter</p>
       </div>
       <button class="modal-x" onclick="closeEmployeeModal()">
         <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
       </button>
     </div>
     <div class="modal-body">
+      <!-- Instruction claire -->
+      <div class="modal-info-box">
+        <span><i class="ph-fill ph-info"></i></span>
+        <div>
+          <strong>Comment ça marche</strong>
+          <p>Saisissez le nom complet et un mot de passe pour cet employé. Il utilisera exactement ces identifiants pour se connecter et choisir son repas.</p>
+        </div>
+      </div>
       <div class="field">
         <label>Nom complet de l'employé</label>
         <div class="field-wrap">
@@ -683,16 +768,121 @@
   </div>
 </div>
 
+<!-- MODAL RESTAURATRICE (créée par l'entreprise) -->
+<div id="resto-modal" class="modal-backdrop hidden" onclick="backdropClose(event,'resto-modal')">
+  <div class="modal">
+    <div class="modal-top">
+      <div>
+        <h3>Créer un compte Restauratrice</h3>
+        <p class="modal-sub">La restauratrice utilisera ces identifiants pour se connecter</p>
+      </div>
+      <button class="modal-x" onclick="closeRestoModal()">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-info-box">
+        <span><i class="ph-fill ph-chef-hat"></i></span>
+        <div>
+          <strong>Comment ça marche</strong>
+          <p>Créez un compte pour votre restauratrice. Elle se connectera avec son nom et ce mot de passe, et verra automatiquement les commandes de votre entreprise.</p>
+        </div>
+      </div>
+      <div class="field">
+        <label>Nom complet de la restauratrice</label>
+        <div class="field-wrap">
+          <svg class="f-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/></svg>
+          <input type="text" id="resto-modal-name" placeholder="Prénom Nom" />
+        </div>
+      </div>
+      <div class="field">
+        <label>Mot de passe (6 caractères minimum)</label>
+        <div class="field-wrap">
+          <svg class="f-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
+          <input type="password" id="resto-modal-password" placeholder="Minimum 6 caractères" minlength="6" />
+          <button type="button" class="eye-btn" onclick="togglePwd('resto-modal-password',this)">
+            <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/><path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/></svg>
+          </button>
+        </div>
+      </div>
+      <div id="resto-modal-error" class="form-error hidden"></div>
+      <button class="btn-submit" onclick="submitAddResto()">
+        Créer le compte restauratrice
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL ADMIN — RENOMMER UN UTILISATEUR -->
+<div id="admin-rename-modal" class="modal-backdrop hidden" onclick="backdropClose(event,'admin-rename-modal')">
+  <div class="modal">
+    <div class="modal-top">
+      <div>
+        <h3 id="admin-rename-title">Renommer</h3>
+        <p class="modal-sub" id="admin-rename-sub">Modifier le nom</p>
+      </div>
+      <button class="modal-x" onclick="closeAdminRenameModal()">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label id="admin-rename-label">Nouveau nom</label>
+        <div class="field-wrap">
+          <svg class="f-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/></svg>
+          <input type="text" id="admin-rename-input" placeholder="Nouveau nom" />
+        </div>
+      </div>
+      <div id="admin-rename-domain-field" class="field hidden">
+        <label>Domaine (email @entreprise.com)</label>
+        <div class="field-wrap">
+          <svg class="f-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"/><path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"/></svg>
+          <input type="text" id="admin-rename-domain" placeholder="exemple.com" />
+        </div>
+      </div>
+      <div id="admin-rename-error" class="form-error hidden"></div>
+      <button class="btn-submit" onclick="submitAdminRename()">
+        Enregistrer les modifications
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL ADMIN — MODIFIER UNE COMMANDE -->
+<div id="admin-choice-modal" class="modal-backdrop hidden" onclick="backdropClose(event,'admin-choice-modal')">
+  <div class="modal">
+    <div class="modal-top">
+      <div>
+        <h3>Modifier la commande</h3>
+        <p class="modal-sub" id="admin-choice-sub">Choisir un nouveau repas</p>
+      </div>
+      <button class="modal-x" onclick="closeAdminChoiceModal()">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="food-grid" id="admin-choice-food-grid"></div>
+      <div id="admin-choice-custom" class="custom-field hidden">
+        <label>Précisez le plat :</label>
+        <input type="text" id="admin-choice-custom-input" placeholder="Ex: Haricots verts sauce tomate..." maxlength="100" />
+      </div>
+      <div id="admin-choice-error" class="form-error hidden"></div>
+      <button class="btn-submit" onclick="submitAdminChoice()">
+        Modifier la commande
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
 <div id="toast" class="toast"></div>
 <script src="app.js"></script>
-
 <script>
-  /* Menu mobile toggle */
   function toggleMenu() {
-    const m = document.getElementById('mobile-menu');
-    m.classList.toggle('hidden');
+    document.getElementById('mobile-menu').classList.toggle('hidden');
   }
-  /* Ferme le menu mobile en scrollant */
   document.querySelectorAll('.mob-link').forEach(l => {
     l.addEventListener('click', () => {
       document.getElementById('mobile-menu').classList.add('hidden');

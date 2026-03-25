@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node --check \"F:/Arlette/FoodChoose/lunchapp/server.js\")",
+      "Bash(npm install:*)",
+      "Bash(node -e \"require\\(''jest''\\)\")",
+      "Bash(node -e \"require\\(''supertest''\\)\")",
+      "Bash(npm test:*)",
+      "Bash(node -e \":*)",
+      "Bash(netstat -ano)",
+      "Bash(findstr \":3000\")",
+      "Bash(findstr \"LISTENING\")",
+      "Bash(findstr /C:\"nodemon\" /C:\"scripts\")",
+      "Bash(taskkill:*)",
+      "Bash(powershell -Command \"Stop-Process -Id 16872 -Force\" 2>&1)"
+    ]
+  }
+}
