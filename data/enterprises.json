@@ -1,10 +1,12 @@
 [
   {
-    "id": "1774410851828",
-    "companyName": "El Immeka",
-    "domain": "Informatique",
-    "password": "$2a$10$IDa476Uj.uD8aAN3UwMbJelVsE4oJyfkT3IOTE3URZ9Rhht1PhkNi",
+    "id": "mn855ia9magpel",
+    "companyName": "El Immeka International",
+    "email": "contact@elimmeka.com",
+    "password": "$2a$10$oNzf/ntif.IoLbJD1p1JR.xcCWZGJsfTBZlNj1kvIKX.qS5wSnRgu",
+    "phone": "+226 50848484",
+    "location": "https://maps.app.goo.gl/vzoNeWvivYnECoRm9",
     "role": "enterprise",
-    "createdAt": "2026-03-25T03:54:11.828Z"
+    "createdAt": "2026-03-27T00:06:28.305Z"
   }
 ]

@@ -1,38 +1,12 @@
 [
   {
-    "id": "1774415962168",
+    "id": "mn857eti29dsm6",
     "fullName": "Mahamadi TASSEMBEDO",
-    "password": "$2a$10$oIrDNDk4IJ.NkTdBYqJzNOFqjAMb0uiHiye/1P9SNmwindfAyI0ma",
+    "gender": "male",
+    "password": "$2a$10$eC5BQPU/MneO40ngp/QGteV2XJpEZqfDLmcTCaVt.E83Gm5r6xwja",
     "role": "employee",
-    "enterpriseId": "1774410851828",
-    "enterpriseName": "El Immeka",
-    "createdAt": "2026-03-25T05:19:22.249Z"
-  },
-  {
-    "id": "1774416029849",
-    "fullName": "Jean-Baptiste ILBOUDO",
-    "password": "$2a$10$WmCv7JaQ/ne/.J2.2RJ0s.iX/XKtkc.kk7YFMatYxef4MGllekdVu",
-    "role": "employee",
-    "enterpriseId": "1774410851828",
-    "enterpriseName": "El Immeka",
-    "createdAt": "2026-03-25T05:20:29.849Z"
-  },
-  {
-    "id": "1774416082056",
-    "fullName": "Abdoul Rachid FOFANA",
-    "password": "$2a$10$a3WlXUIZiPcXCSKvVTjS0ebCvMOUQBjWRWICN9FUFsEBP3NpJDdIa",
-    "role": "employee",
-    "enterpriseId": "1774410851828",
-    "enterpriseName": "El Immeka",
-    "createdAt": "2026-03-25T05:21:22.056Z"
-  },
-  {
-    "id": "1774429078404",
-    "fullName": "Danissa DALA",
-    "password": "$2a$10$a9P0gdYvMvnKLQp8Kf35ZOEV2W2jskOcWd9pGag2IXA8TvYXry/6i",
-    "role": "employee",
-    "enterpriseId": "1774410851828",
-    "enterpriseName": "El Immeka",
-    "createdAt": "2026-03-25T08:57:58.404Z"
+    "enterpriseId": "mn855ia9magpel",
+    "enterpriseName": "El Immeka International",
+    "createdAt": "2026-03-27T00:07:57.126Z"
   }
 ]

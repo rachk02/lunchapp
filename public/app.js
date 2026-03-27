@@ -1,1657 +1,1653 @@
-// ── Liste des plats disponibles ──────────────────────────────────────────────
-const FOODS = [
-  { id: 'riz_gras_soumbala', label: 'Riz gras au soumbala',           emoji: '🍚' },
-  { id: 'riz_gras_simple',   label: 'Riz gras simple',                emoji: '🍛' },
-  { id: 'riz_blanc_tomate',  label: 'Riz blanc sauce tomate',         emoji: '🍅' },
-  { id: 'riz_blanc_arachide',label: "Riz blanc sauce pâte d'arachide",emoji: '🥜' },
-  { id: 'couscous',          label: 'Couscous',                       emoji: '🫙' },
-  { id: 'dankounou',         label: 'Dankounou',                      emoji: '🥘' },
-  { id: 'placali',           label: 'Placali',                        emoji: '🫕' },
-  { id: 'to_sauce_feuille',  label: 'Tô sauce feuille',               emoji: '🌿' },
-  { id: 'Autres',            label: 'Autres (préciser)',               emoji: '✏️' },
-];
+// ═══════════════════════════════════════════════════════════════════════════
+// app.js — LunchApp v2 Frontend
+// ═══════════════════════════════════════════════════════════════════════════
 
-// ── Constante de verrouillage (identique à server.js) ────────────────────────
-const LOCK_MS = 5 * 60 * 1000; // 5 minutes en millisecondes
+// ─── État global ─────────────────────────────────────────────────────────────
+let token     = localStorage.getItem('la_token') || null;
+let me        = JSON.parse(localStorage.getItem('la_user') || 'null');
+let sseSource = null;
 
-// ── État global de l'application ─────────────────────────────────────────────
-let token            = localStorage.getItem('la_token');
-let me               = JSON.parse(localStorage.getItem('la_user') || 'null');
-let selectedFood     = null;
-let isEditMode       = false;
-let currentLoginType = 'employee';
-let intervals        = [];
-let choiceTimer      = null;
-let toastTimer;
+// Data caches (indexed by ID for safe onclick references)
+const _menuItemCache = {};
+const _empCache = {};
 
-// ── SSE ───────────────────────────────────────────────────────────────────────
-let sseSource        = null;
+// UI temporaire
+let _dailyDate        = todayStr();
+let _profilePhotoData = null;
+let _ratingChoiceId   = null;
+let _ratingStars      = 0;
+let _subRestaurantId  = null;
+let _orderRestaurantId = null;
+let _chatPartnerId    = null;
+let _chatPartnerSuffix = ''; // '' or 'ent'
+let _mediaRecorder    = null;
+let _audioChunks      = [];
+let _recTimerInterval = null;
+let _recSeconds       = 0;
+let _confirmCallback  = null;
+let _adminTab         = 'ov';
 
-// ── Enregistrement audio ──────────────────────────────────────────────────────
-let mediaRecorder     = null;
-let audioChunks       = [];
-let audioBlob         = null;
-let recordingInterval = null;
-let recordingSeconds  = 0;
+// ─── Utilitaires ─────────────────────────────────────────────────────────────
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+function fmtDate(d) {
+  if (!d) return '';
+  return new Date(d + 'T00:00:00').toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+}
+function fmtDateTime(iso) {
+  return iso ? new Date(iso).toLocaleString('fr-FR') : '';
+}
+function fmtPrice(n) {
+  return Number(n || 0).toLocaleString('fr-FR') + ' FCFA';
+}
+function el(id) { return document.getElementById(id); }
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function stars(n) {
+  return '⭐'.repeat(Math.max(0, Math.min(5, Math.round(n || 0))));
+}
 
+// ─── Toast ────────────────────────────────────────────────────────────────────
+function toast(msg, type = 'info') {
+  const t = document.createElement('div');
+  t.className = `toast toast-${type}`;
+  t.textContent = msg;
+  el('toasts').appendChild(t);
+  setTimeout(() => t.remove(), 3500);
+}
 
+// ─── Confirm dialog ───────────────────────────────────────────────────────────
+function confirm2(msg, cb) {
+  el('confirm-msg').textContent = msg;
+  _confirmCallback = cb;
+  el('confirm-overlay').classList.remove('hidden');
+}
 document.addEventListener('DOMContentLoaded', () => {
-  buildFoodGrid();   // Construit la grille des plats dans le modal
-  setNavDate();      // Affiche la date dans la navbar
-
-  // Initialise le sélecteur de login sur "Employé" par défaut
-  const defaultBtn = document.querySelector('.lts-btn[data-type="employee"]');
-  setLoginType('employee', defaultBtn);
-
-  // Démarre l'app si une session existe, sinon affiche la landing
-  if (token && me) bootApp();
-  else showScreen('landing-screen');
+  el('confirm-ok').onclick     = () => { el('confirm-overlay').classList.add('hidden'); if (_confirmCallback) _confirmCallback(); };
+  el('confirm-cancel').onclick = () => { el('confirm-overlay').classList.add('hidden'); };
 });
 
-
-// Affiche un écran (landing | auth | app) et masque les autres
-function showScreen(id) {
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-}
-
-// Navigue vers la connexion depuis la landing
-function goToLogin() {
-  showScreen('auth-screen');
-  showAuthPanel('panel-login');
-}
-
-// Navigue vers l'inscription entreprise depuis la landing
-function goToRegisterEnterprise() {
-  showScreen('auth-screen');
-  showAuthPanel('panel-register-enterprise');
-}
-
-// Affiche un panneau auth et masque les autres
-function showAuthPanel(panelId) {
-  document.querySelectorAll('.auth-panel').forEach(p => p.classList.add('hidden'));
-  document.getElementById(panelId).classList.remove('hidden');
-}
-
-// Affiche une section de l'app et charge ses données
-function showSection(name) {
-  document.querySelectorAll('.app-section').forEach(s => s.classList.remove('active'));
-  document.getElementById(`section-${name}`).classList.add('active');
-
-  // Synchronise la navigation mobile
-  document.querySelectorAll('.bnav-btn').forEach(b =>
-    b.classList.toggle('active', b.dataset.section === name)
-  );
-
-  // Charge les données de la section
-  if (name === 'today')     loadToday();
-  if (name === 'employees') loadEmployees();
-  if (name === 'history')   loadHistory();
-  if (name === 'messages')  loadMessages();
-  if (name === 'admin')     loadAdminDashboard();
-}
-
-
-// Met à jour le formulaire de login selon le type sélectionné
-function setLoginType(type, btn) {
-  currentLoginType = type;
-
-  // Mise à jour visuelle des boutons
-  document.querySelectorAll('.lts-btn').forEach(b => b.classList.remove('active'));
-  if (btn) btn.classList.add('active');
-
-  const label = document.getElementById('login-identifier-label');
-  const input = document.getElementById('login-identifier');
-  const hint  = document.getElementById('login-type-hint');
-
-  const config = {
-    employee:      { label: 'Votre nom complet',    placeholder: 'Prénom Nom (ou Nom Prénom)',   hint: 'Connectez-vous avec votre nom et mot de passe' },
-    enterprise:    { label: "Nom de l'entreprise",  placeholder: 'Ex: Tech Solutions SARL',       hint: "Connectez-vous avec le nom exact de votre entreprise" },
-    restauratrice: { label: 'Votre nom complet',    placeholder: 'Prénom Nom',                    hint: 'Connectez-vous avec votre nom et mot de passe' },
-    superadmin:    { label: 'Email administrateur', placeholder: 'admin@example.com',             hint: 'Accès réservé aux super-administrateurs système' },
-  };
-
-  const c = config[type];
-  if (label) label.textContent = c.label;
-  if (input) input.placeholder = c.placeholder;
-  if (hint)  hint.textContent  = c.hint;
-
-  // ⚠️ CORRECTION BUG : on garde TOUJOURS type="text"
-  // Mettre type="email" déclenchait la validation HTML5 du navigateur
-  // qui bloquait la soumission AVANT handleLogin, envoyant un champ vide au serveur
-  // → Résultat : "Email et mot de passe requis" même avec des valeurs saisies
-  if (input) input.type = 'text';
-}
-
-// Gère la soumission du formulaire de connexion
-async function handleLogin(e) {
-  e.preventDefault();
-  clearErr('login-error');
-
-  const identifier = document.getElementById('login-identifier').value.trim();
-  const password   = document.getElementById('login-password').value;
-
-  // ── Validation JS côté client (remplace la validation HTML5 native) ──
-  if (!identifier) {
-    const labels = {
-      employee:      'votre nom complet',
-      enterprise:    "le nom de l'entreprise",
-      restauratrice: 'votre nom complet',
-      superadmin:    "l'email administrateur",
-    };
-    showErr('login-error', `Veuillez saisir ${labels[currentLoginType] || 'votre identifiant'}.`);
-    return;
-  }
-
-  if (!password) {
-    showErr('login-error', 'Veuillez saisir votre mot de passe.');
-    return;
-  }
-
-  // Validation format email uniquement pour superadmin (faite en JS, pas via input.type)
-  if (currentLoginType === 'superadmin') {
-    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier);
-    if (!emailOk) {
-      showErr('login-error', 'Veuillez saisir une adresse email valide.');
-      return;
-    }
-  }
-
-  const btn = document.querySelector('#login-form .btn-submit');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="btn-spinner"></span> Connexion...';
-
-  try {
-    const d = await api('/api/login', 'POST', { identifier, password, loginType: currentLoginType });
-    persist(d);
-    bootApp();
-  } catch (err) {
-    showErr('login-error', err.message);
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = 'Se connecter <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>';
-  }
-}
-
-// Gère l'inscription d'une entreprise
-async function handleRegisterEnterprise(e) {
-  e.preventDefault();
-  clearErr('register-ent-error');
-
-  const companyName = document.getElementById('ent-name').value.trim();
-  const domain      = document.getElementById('ent-domain').value.trim();
-  const password    = document.getElementById('ent-password').value;
-
-  const btn = document.querySelector('#register-enterprise-form .btn-submit');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="btn-spinner"></span> Création...';
-
-  try {
-    const d = await api('/api/enterprise/register', 'POST', { companyName, domain, password });
-    persist(d);
-    bootApp();
-  } catch (err) {
-    showErr('register-ent-error', err.message);
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = 'Créer mon compte entreprise <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>';
-  }
-}
-
-// Gère l'inscription d'une restauratrice
-async function handleRegisterRestauratrice(e) {
-  e.preventDefault();
-  clearErr('register-resto-error');
-
-  const fullName = document.getElementById('resto-name').value.trim();
-  const password = document.getElementById('resto-password').value;
-
-  const btn = document.querySelector('#register-resto-form .btn-submit');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="btn-spinner"></span> Création...';
-
-  try {
-    const d = await api('/api/restauratrice/register', 'POST', { fullName, password });
-    persist(d);
-    bootApp();
-  } catch (err) {
-    showErr('register-resto-error', err.message);
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = 'Créer mon compte <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>';
-  }
-}
-
-// Sauvegarde la session dans les variables globales et localStorage
-function persist(d) {
-  token = d.token;
-  me    = d.user;
-  localStorage.setItem('la_token', token);
-  localStorage.setItem('la_user', JSON.stringify(me));
-}
-
-// Déconnecte et réinitialise l'état complet
-function logout() {
-  token = null; me = null;
-  localStorage.removeItem('la_token');
-  localStorage.removeItem('la_user');
-  intervals.forEach(clearInterval); intervals = [];
-  stopChoiceTimer();
-  if (sseSource) { sseSource.close(); sseSource = null; }
-  showScreen('landing-screen');
-}
-
-
-function bootApp() {
-  // Configuration des badges de rôle
-  const roleConfig = {
-    employee:      { badge: 'Employé(e)',            color: 'var(--o1)' },
-    enterprise:    { badge: ' Chargé de commande', color: 'var(--s1)' },
-    restauratrice: { badge: '👩 Restauratrice',      color: 'var(--green)' },
-    superadmin:    { badge: ' Super Admin',         color: 'var(--red)' },
-  };
-  const rc = roleConfig[me.role] || { badge: me.role, color: 'var(--ink4)' };
-
-  // Renseigne la navbar
-  document.getElementById('nav-avatar').textContent     = me.fullName.charAt(0).toUpperCase();
-  document.getElementById('nav-user-name').textContent  = me.fullName.split(' ')[0];
-  document.getElementById('nav-role-badge').textContent = rc.badge;
-  document.getElementById('nav-role-badge').style.color = rc.color;
-
-  // Navigation mobile
-  setupBottomNav();
-
-  // Panneaux spécifiques aux rôles
-  document.getElementById('enterprise-panel').classList.toggle('hidden', me.role !== 'enterprise');
-  document.getElementById('resto-panel').classList.toggle('hidden', me.role !== 'restauratrice');
-  document.getElementById('card-my-choice').classList.toggle('hidden', me.role !== 'employee');
-
-  // Boutons de la navbar selon le rôle
-  document.getElementById('nav-msg-btn').classList.toggle('hidden', !['enterprise', 'restauratrice'].includes(me.role));
-  document.getElementById('nav-history-btn').classList.toggle('hidden', me.role !== 'employee');
-
-  showScreen('app-screen');
-
-  // Section de départ selon le rôle
-  if (me.role === 'superadmin') showSection('admin');
-  else showSection('today');
-
-  // Rafraîchissement automatique toutes les 20s
-  intervals.push(setInterval(loadToday, 20000));
-
-  // SSE + notifications pour messagerie
-  if (['enterprise', 'restauratrice'].includes(me.role)) {
-    connectSSE();
-    requestNotifPermission();
-    intervals.push(setInterval(pollUnread, 15000)); // fallback polling
-  }
-}
-
-// ════════════════════════════════════════════════════════════════
-// SSE — NOTIFICATIONS TEMPS RÉEL
-// ════════════════════════════════════════════════════════════════
-
-function connectSSE() {
-  if (!token) return;
-  if (sseSource) { sseSource.close(); sseSource = null; }
-
-  sseSource = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
-
-  sseSource.onmessage = (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      if (data.type === 'new_message') onNewMessageSSE(data.message);
-    } catch {}
-  };
-
-  sseSource.onerror = () => {
-    // Reconnexion automatique après 5 s si la connexion se coupe
-    if (sseSource) { sseSource.close(); sseSource = null; }
-    setTimeout(() => { if (token) connectSSE(); }, 5000);
-  };
-}
-
-function onNewMessageSSE(msg) {
-  // Met à jour le badge non-lus
-  pollUnread();
-
-  // Si la section messagerie est ouverte → recharge silencieusement
-  const chatActive = document.getElementById('section-messages').classList.contains('active');
-  if (chatActive) { loadMessages(); return; }
-
-  // Sinon : notification navigateur + son
-  const preview = msg.type === 'audio' ? '🎤 Message vocal' : msg.content;
-  showBrowserNotif(msg.senderName, preview);
-  playNotifSound();
-  showInAppBanner(msg.senderName, preview);
-}
-
-// ── Notification navigateur ───────────────────────────────────────────────────
-function requestNotifPermission() {
-  if ('Notification' in window && Notification.permission === 'default')
-    Notification.requestPermission();
-}
-
-function showBrowserNotif(senderName, body) {
-  if (!('Notification' in window) || Notification.permission !== 'granted') return;
-  const n = new Notification(senderName, { body, icon: '' });
-  n.onclick = () => { window.focus(); showSection('messages'); n.close(); };
-  setTimeout(() => n.close(), 6000);
-}
-
-function playNotifSound() {
-  try {
-    const ctx  = new (window.AudioContext || window.webkitAudioContext)();
-    const osc  = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain); gain.connect(ctx.destination);
-    osc.type = 'sine';
-    // Deux notes courtes "ding-ding"
-    [880, 1100].forEach((freq, i) => {
-      const t = ctx.currentTime + i * 0.18;
-      osc.frequency.setValueAtTime(freq, t);
-      gain.gain.setValueAtTime(0, t);
-      gain.gain.linearRampToValueAtTime(0.22, t + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
-    });
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.4);
-    setTimeout(() => ctx.close(), 1000);
-  } catch {}
-}
-
-// ── Bandeau in-app (quand la section messages n'est pas active) ───────────────
-function showInAppBanner(senderName, preview) {
-  const existing = document.getElementById('notif-banner');
-  if (existing) existing.remove();
-
-  const banner = document.createElement('div');
-  banner.id = 'notif-banner';
-  banner.className = 'notif-banner';
-  banner.innerHTML = `
-    <div class="nb-content">
-      <span class="nb-icon"><i class="ph-fill ph-chat-circle-dots"></i></span>
-      <div class="nb-text">
-        <strong>${esc(senderName)}</strong>
-        <span>${esc(preview.length > 50 ? preview.slice(0, 50) + '…' : preview)}</span>
-      </div>
-    </div>
-    <button class="nb-open" onclick="showSection('messages');this.closest('.notif-banner').remove()">Voir</button>
-    <button class="nb-close" onclick="this.closest('.notif-banner').remove()">✕</button>`;
-  document.body.appendChild(banner);
-
-  // Auto-fermeture après 6 s
-  setTimeout(() => { if (banner.parentNode) banner.remove(); }, 6000);
-}
-
-// Configure la navigation mobile selon le rôle
-function setupBottomNav() {
-  const nav = document.getElementById('bottom-nav');
-
-  const tabs = {
-    employee:      [
-      { icon: '<i class="ph-fill ph-fork-knife"></i>', label: "Aujourd'hui", section: 'today' },
-      { icon: '<i class="ph-fill ph-clock-countdown"></i>', label: 'Historique',   section: 'history' },
-    ],
-    enterprise:    [
-      { icon: '<i class="ph-fill ph-fork-knife"></i>', label: "Aujourd'hui", section: 'today' },
-      { icon: '<i class="ph-fill ph-users"></i>', label: 'Employés',     section: 'employees' },
-      { icon: '<i class="ph-fill ph-chat-circle-dots"></i>', label: 'Messages',     section: 'messages', badge: true },
-    ],
-    restauratrice: [
-      { icon: '<i class="ph-fill ph-fork-knife"></i>', label: 'Commandes',   section: 'today' },
-      { icon: '<i class="ph-fill ph-chat-circle-dots"></i>', label: 'Messages',     section: 'messages', badge: true },
-    ],
-    superadmin:    [
-      { icon: '', label: 'Dashboard',    section: 'admin' },
-    ],
-  };
-
-  const roleTabs = tabs[me.role] || [];
-
-  nav.innerHTML = roleTabs.map(t => `
-    <button
-      class="bnav-btn ${(t.section === 'today' || t.section === 'admin') ? 'active' : ''}"
-      onclick="showSection('${t.section}')"
-      data-section="${t.section}">
-      <span class="bnav-icon">${t.icon}</span>
-      <span class="bnav-label">${t.label}</span>
-      ${t.badge ? `<span class="bnav-badge hidden" id="msg-badge-mob"></span>` : ''}
-    </button>`).join('') +
-    // Bouton déconnexion toujours présent dans la nav mobile
-    `<button class="bnav-btn bnav-logout" onclick="logout()">
-      <span class="bnav-icon"><i class="ph-bold ph-sign-out"></i></span>
-      <span class="bnav-label">Sortir</span>
-    </button>`;
-}
-
-// Affiche la date du jour dans la navbar
-function setNavDate() {
-  const s = new Date().toLocaleDateString('fr-FR', {
-    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-  });
-  const el = document.getElementById('nav-date');
-  if (el) el.textContent = s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-
-async function loadToday() {
-  if (me?.role === 'superadmin') return;
-
-  try {
-    const [all, mine] = await Promise.all([
-      api('/api/choices/today'),
-      me.role === 'employee' ? api('/api/choices/mine') : Promise.resolve(null),
-    ]);
-
-    if (me.role === 'employee')      renderMyChoice(mine);
-    renderTeamGrid(all);
-    if (me.role === 'enterprise')    renderEnterprisePanel(all);
-    if (me.role === 'restauratrice') renderRestoPanel(all);
-
-  } catch (err) {
-    if (err.status === 401) logout();
-  }
-}
-
-// ── Carte "Mon repas du jour" ────────────────────────────────────────────────
-
-function renderMyChoice(c) {
-  stopChoiceTimer();
-
-  const filled    = document.getElementById('my-choice-filled');
-  const empty     = document.getElementById('my-choice-empty');
-  const badge     = document.getElementById('order-badge');
-  const actions   = document.getElementById('mc-actions');
-  const timerWrap = document.getElementById('mc-timer-wrap');
-
-  if (c) {
-    const f = findFood(c.food);
-    document.getElementById('mc-emoji').textContent = f.emoji;
-    document.getElementById('mc-name').textContent  =
-      c.food === 'Autres' ? (c.customFood || 'Autre plat') : f.label;
-    document.getElementById('mc-time').textContent  =
-      'Choisi à ' + new Date(c.updatedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-
-    if (c.orderLaunched) {
-      badge.innerHTML       = '<span class="badge-launched"><i class="ph-bold ph-check-circle"></i> Commande lancée</span>';
-      actions.style.display = 'none';
-      timerWrap.innerHTML   = renderTimerLocked('Commande transmise à la restauratrice.');
-    } else {
-      badge.innerHTML = '<span class="badge-pending"><i class="ph-bold ph-hourglass-medium"></i> En attente</span>';
-      startChoiceTimer(c.updatedAt, actions, timerWrap);
-    }
-
-    filled.classList.remove('hidden');
-    empty.classList.add('hidden');
-  } else {
-    filled.classList.add('hidden');
-    empty.classList.remove('hidden');
-    badge.innerHTML = '';
-  }
-}
-
-// ── Timer 5 minutes ──────────────────────────────────────────────────────────
-
-function startChoiceTimer(updatedAt, actionsEl, wrapEl) {
-  const updatedMs = new Date(updatedAt).getTime();
-
-  function tick() {
-    const elapsed   = Date.now() - updatedMs;
-    const remaining = LOCK_MS - elapsed;
-
-    if (remaining <= 0) {
-      stopChoiceTimer();
-      actionsEl.style.display = 'none';
-      wrapEl.innerHTML = renderTimerLocked('Le délai de 5 minutes est expiré. Votre choix est définitivement enregistré.');
-      return;
-    }
-
-    actionsEl.style.display = 'flex';
-
-    const mins = Math.floor(remaining / 60000);
-    const secs = Math.floor((remaining % 60000) / 1000);
-    const pct  = (remaining / LOCK_MS) * 100;
-
-    let color = 'green';
-    if (remaining < 60000)       color = 'red';
-    else if (remaining < 120000) color = 'orange';
-
-    wrapEl.innerHTML = `
-      <div class="timer-bar-row">
-        <span class="timer-icon">${color === 'red' ? '⚠️' : '⏱️'}</span>
-        <div class="timer-bar-outer">
-          <div class="timer-bar-inner ${color}" style="width:${pct.toFixed(1)}%"></div>
-        </div>
-        <span class="timer-label ${color}">${mins}:${secs.toString().padStart(2, '0')}</span>
-      </div>
-      <div class="timer-hint">
-        ${color === 'red'
-          ? "⚠️ Moins d'une minute ! Modifiez ou supprimez rapidement."
-          : `Vous pouvez modifier ou supprimer pendant encore ${mins} min ${secs} s.`}
-      </div>`;
-  }
-
-  tick();
-  choiceTimer = setInterval(tick, 1000);
-}
-
-function stopChoiceTimer() {
-  if (choiceTimer) { clearInterval(choiceTimer); choiceTimer = null; }
-}
-
-function renderTimerLocked(reason) {
-  return `<div class="timer-locked-row">
-    <span class="tl-icon">🔒</span>
-    <div class="tl-text"><strong>Choix verrouillé</strong>${esc(reason)}</div>
-  </div>`;
-}
-
-// ── Grille des choix ─────────────────────────────────────────────────────────
-
-function renderTeamGrid(all) {
-  const grid = document.getElementById('choices-grid');
-  document.getElementById('team-count').textContent = `${all.length} choix`;
-
-  if (!all.length) {
-    grid.innerHTML = `<div class="empty-grid">
-      <div class="eg-icon"><i class="ph-thin ph-bowl-food"></i></div>
-      <p>Aucun choix pour aujourd'hui</p>
-      <small>Soyez le premier à choisir !</small>
-    </div>`;
-    return;
-  }
-
-  grid.innerHTML = all.map((c, i) => {
-    const f    = findFood(c.food);
-    const isMe = me.role === 'employee' && c.userId === me.id;
-    const ini  = initials(c.userName);
-
-    return `
-      <div class="choice-card ${isMe ? 'mine' : ''}" style="animation-delay:${i * 0.04}s">
-        <div class="cc-head">
-          <div class="cc-av">${ini}</div>
-          <div>
-            <div class="cc-nm">${esc(c.userName)}</div>
-            ${isMe ? '<div class="cc-me">👈 Vous</div>' : ''}
-          </div>
-        </div>
-        <div class="cc-food">${f.emoji} ${esc(f.label)}</div>
-        ${c.food === 'Autres' && c.customFood ? `<div class="cc-custom">${esc(c.customFood)}</div>` : ''}
-      </div>`;
-  }).join('');
-}
-
-// ── Panneaux Entreprise et Restauratrice ─────────────────────────────────────
-
-function renderEnterprisePanel(all) {
-  const launched = all.some(c => c.orderLaunched);
-
-  document.getElementById('enterprise-panel-title').textContent = ` ${me.companyName}`;
-  document.getElementById('enterprise-subtitle').textContent = launched
-    ? `<i class="ph-bold ph-check-circle"></i> Commande lancée — ${all.length} repas commandés`
-    : `${all.length} employé(s) ont fait leur choix`;
-
-  const btn = document.getElementById('launch-btn');
-  btn.disabled = launched || all.length === 0;
-  btn.innerHTML = launched
-    ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> Commande lancée`
-    : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> Lancer la commande`;
-
-  renderDishCounts('dish-counts', all, true);
-}
-
-function renderRestoPanel(all) {
-  const launched   = all.some(c => c.orderLaunched);
-  const entName    = me.enterpriseName ? ` — ${me.enterpriseName}` : '';
-
-  document.getElementById('resto-subtitle').textContent = launched
-    ? `<i class="ph-bold ph-check-circle"></i> ${all.length} commandes reçues${entName}`
-    : `<i class="ph-bold ph-hourglass-medium"></i> ${all.length} choix en attente${entName}`;
-
-  document.getElementById('resto-status-badge').innerHTML = launched
-    ? '<span class="badge-launched"><i class="ph-bold ph-check-circle"></i> Commande confirmée</span>'
-    : '<span class="badge-pending"><i class="ph-bold ph-hourglass-medium"></i> En attente</span>';
-
-  renderDishCounts('dish-counts-resto', all, false);
-}
-
-function renderDishCounts(containerId, all, darkTheme) {
-  const container = document.getElementById(containerId);
-  const counts    = {};
-
-  all.forEach(c => {
-    const key = c.food === 'Autres' ? (c.customFood || 'Autre') : c.food;
-    counts[key] = (counts[key] || 0) + 1;
-  });
-
-  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-
-  if (!entries.length) {
-    container.innerHTML = `<span style="color:${darkTheme ? 'rgba(255,255,255,.4)' : 'var(--ink5)'}; font-size:.85rem;">Aucun choix pour l'instant</span>`;
-    return;
-  }
-
-  container.innerHTML = entries.map(([name, count]) => {
-    const food  = FOODS.find(f => f.id === name) || { emoji: '🍽️', label: name };
-    const label = food.label === 'Autres (préciser)' ? name : food.label;
-    return `<div class="dish-count-chip">
-      <span>${food.emoji}</span>
-      <span>${esc(label)}</span>
-      <span class="dc-badge">${count}</span>
-    </div>`;
-  }).join('');
-}
-
-// ── Actions sur les choix ────────────────────────────────────────────────────
-
-async function launchOrder() {
-  if (!confirm('Lancer la commande pour tous les repas du jour ?')) return;
-  try {
-    const r = await api('/api/choices/launch', 'POST');
-    toast(`🚀 Commande lancée — ${r.count} repas commandés !`, 'ok');
-    loadToday();
-  } catch (err) { toast(err.message, 'err'); }
-}
-
-async function deleteMyChoice() {
-  if (!confirm('Supprimer votre choix du jour ?')) return;
-  try {
-    await api('/api/choices/mine', 'DELETE');
-    toast('🗑️ Choix supprimé', 'info');
-    loadToday();
-  } catch (err) {
-    toast(err.message, 'err');
-    loadToday();
-  }
-}
-
-
-function buildFoodGrid() {
-  document.getElementById('food-grid').innerHTML = FOODS.map(f => `
-    <div class="food-opt ${f.id === 'Autres' ? 'autres-opt' : ''}"
-         data-id="${f.id}" onclick="pickFood('${f.id}')">
-      <span class="fo-em">${f.emoji}</span>
-      <span>${f.label}</span>
-    </div>`).join('');
-}
-
-function openChoiceModal() {
-  isEditMode = false; selectedFood = null;
-  document.getElementById('modal-title').textContent = 'Choisir mon repas';
-  document.getElementById('custom-input').value      = '';
-  document.getElementById('custom-field').classList.add('hidden');
-  document.getElementById('modal-error').classList.add('hidden');
-  document.querySelectorAll('.food-opt').forEach(o => o.classList.remove('sel'));
-  document.getElementById('food-modal').classList.remove('hidden');
-}
-
-async function openEditModal() {
-  isEditMode = true;
-  document.getElementById('modal-title').textContent = 'Modifier mon repas';
-  document.getElementById('modal-error').classList.add('hidden');
-
-  try {
-    const c = await api('/api/choices/mine');
-    selectedFood = c?.food || null;
-    document.querySelectorAll('.food-opt').forEach(o => o.classList.remove('sel'));
-
-    if (selectedFood) {
-      document.querySelector(`.food-opt[data-id="${selectedFood}"]`)?.classList.add('sel');
-      if (selectedFood === 'Autres') {
-        document.getElementById('custom-field').classList.remove('hidden');
-        document.getElementById('custom-input').value = c.customFood || '';
-      } else {
-        document.getElementById('custom-field').classList.add('hidden');
-      }
-    }
-  } catch { selectedFood = null; }
-
-  document.getElementById('food-modal').classList.remove('hidden');
-}
-
-function closeFoodModal() { document.getElementById('food-modal').classList.add('hidden'); }
-
-function backdropClose(e, modalId) {
-  if (e.target.id === modalId) document.getElementById(modalId).classList.add('hidden');
-}
-
-function pickFood(id) {
-  selectedFood = id;
-  document.querySelectorAll('.food-opt').forEach(o => o.classList.toggle('sel', o.dataset.id === id));
-  if (id === 'Autres') {
-    document.getElementById('custom-field').classList.remove('hidden');
-    document.getElementById('custom-input').focus();
-  } else {
-    document.getElementById('custom-field').classList.add('hidden');
-  }
-}
-
-async function submitChoice() {
-  if (!selectedFood) { setModalErr('Veuillez sélectionner un repas.'); return; }
-
-  const customFood = document.getElementById('custom-input').value.trim();
-  if (selectedFood === 'Autres' && !customFood) { setModalErr('Veuillez préciser votre plat.'); return; }
-
-  const btn = document.querySelector('#food-modal .btn-submit');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="btn-spinner"></span> Enregistrement...';
-
-  try {
-    await api('/api/choices', 'POST', { food: selectedFood, customFood });
-    closeFoodModal();
-    toast(isEditMode ? '✏️ Choix modifié !' : '✅ Choix enregistré !', 'ok');
-    loadToday();
-  } catch (err) {
-    setModalErr(err.message);
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = 'Confirmer mon choix <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>';
-  }
-}
-
-
-async function loadEmployees() {
-  if (me.role !== 'enterprise') return;
-
-  const el = document.getElementById('employees-list');
-  el.innerHTML = '<div class="skeleton-state">Chargement...</div>';
-
-  try {
-    const employees = await api('/api/enterprise/employees');
-
-    if (!employees.length) {
-      el.innerHTML = `<div class="empty-hist">
-        <div class="eh-icon">👥</div>
-        <p>Aucun employé encore créé</p>
-        <small>Cliquez sur "Ajouter un employé" pour commencer</small>
-      </div>`;
-      return;
-    }
-
-    el.innerHTML = employees.map((emp, i) => `
-      <div class="employee-item" style="animation-delay:${i * 0.04}s">
-        <div class="ei-av">${initials(emp.fullName)}</div>
-        <div class="ei-info">
-          <div class="ei-name">${esc(emp.fullName)}</div>
-          <div class="ei-meta">Créé le ${new Date(emp.createdAt).toLocaleDateString('fr-FR')}</div>
-        </div>
-        <button class="ei-del" onclick="deleteEmployee('${emp.id}')" title="Supprimer">
-          <svg viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/>
-          </svg>
-        </button>
-      </div>`).join('');
-
-  } catch {
-    el.innerHTML = '<div class="empty-hist"><p>Erreur de chargement</p></div>';
-  }
-}
-
-function openAddEmployeeModal() {
-  document.getElementById('emp-name').value     = '';
-  document.getElementById('emp-password').value = '';
-  document.getElementById('emp-modal-error').classList.add('hidden');
-  document.getElementById('employee-modal').classList.remove('hidden');
-}
-
-function closeEmployeeModal() { document.getElementById('employee-modal').classList.add('hidden'); }
-
-async function submitAddEmployee() {
-  const fullName = document.getElementById('emp-name').value.trim();
-  const password = document.getElementById('emp-password').value;
-
-  if (!fullName || !password) { setEmpModalErr('Veuillez remplir le nom et le mot de passe.'); return; }
-  if (password.length < 6)   { setEmpModalErr('Le mot de passe doit contenir au moins 6 caractères.'); return; }
-
-  const btn = document.querySelector('#employee-modal .btn-submit');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="btn-spinner"></span> Création...';
-
-  try {
-    await api('/api/enterprise/employees', 'POST', { fullName, password });
-    closeEmployeeModal();
-    toast(`✅ Compte créé pour ${fullName} !`, 'ok');
-    loadEmployees();
-  } catch (err) {
-    setEmpModalErr(err.message);
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = 'Créer le compte employé <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>';
-  }
-}
-
-async function deleteEmployee(id) {
-  if (!confirm('Supprimer définitivement cet employé ?')) return;
-  try {
-    await api(`/api/enterprise/employees/${id}`, 'DELETE');
-    toast('🗑️ Employé supprimé', 'info');
-    loadEmployees();
-  } catch (err) { toast(err.message, 'err'); }
-}
-
-
-// ── Gestion restauratrice (créée par l'entreprise) ────────────────────────────
-
-function openAddRestoModal() {
-  document.getElementById('resto-modal-name').value     = '';
-  document.getElementById('resto-modal-password').value = '';
-  document.getElementById('resto-modal-error').classList.add('hidden');
-  document.getElementById('resto-modal').classList.remove('hidden');
-}
-
-function closeRestoModal() { document.getElementById('resto-modal').classList.add('hidden'); }
-
-async function submitAddResto() {
-  const fullName = document.getElementById('resto-modal-name').value.trim();
-  const password = document.getElementById('resto-modal-password').value;
-
-  if (!fullName || !password) { setRestoModalErr('Veuillez remplir le nom et le mot de passe.'); return; }
-  if (password.length < 6)   { setRestoModalErr('Le mot de passe doit contenir au moins 6 caractères.'); return; }
-
-  const btn = document.querySelector('#resto-modal .btn-submit');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="btn-spinner"></span> Création...';
-
-  try {
-    await api('/api/enterprise/restauratrice', 'POST', { fullName, password });
-    closeRestoModal();
-    toast(`✅ Compte restauratrice créé pour ${fullName} !`, 'ok');
-  } catch (err) {
-    setRestoModalErr(err.message);
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = 'Créer le compte restauratrice <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>';
-  }
-}
-
-
-async function loadHistory() {
-  const el = document.getElementById('history-list');
-  el.innerHTML = '<div class="skeleton-state">Chargement...</div>';
-
-  try {
-    const h = await api('/api/history');
-
-    if (!h.length) {
-      el.innerHTML = `<div class="empty-hist">
-        <div class="eh-icon"></div>
-        <p>Aucun historique</p>
-        <small>Vos choix passés apparaîtront ici</small>
-      </div>`;
-      return;
-    }
-
-    el.innerHTML = h.map((c, i) => {
-      const f = findFood(c.food);
-      const d = new Date(c.date);
-      return `
-        <div class="history-item" style="animation-delay:${i * 0.04}s">
-          <div class="hi-date-block">
-            <span class="hi-day">${d.getDate().toString().padStart(2, '0')}</span>
-            <span class="hi-month">${d.toLocaleDateString('fr-FR', { month: 'short' })}</span>
-          </div>
-          <div>
-            <div class="hi-food-name">${f.emoji} ${esc(f.label)}</div>
-            ${c.food === 'Autres' && c.customFood ? `<div class="hi-custom-txt">${esc(c.customFood)}</div>` : ''}
-          </div>
-          <span class="hi-st ${c.orderLaunched ? 'ok' : 'wait'}">
-            ${c.orderLaunched ? '<i class="ph-fill ph-check-circle"></i> Commandé' : '<i class="ph-fill ph-hourglass-medium"></i> En attente'}
-          </span>
-        </div>`;
-    }).join('');
-
-  } catch { el.innerHTML = '<div class="empty-hist"><p>Erreur de chargement</p></div>'; }
-}
-
-
-async function loadMessages() {
-  const box = document.getElementById('chat-messages');
-
-  try {
-    const msgs = await api('/api/messages');
-    await api('/api/messages/read', 'POST');
-    updateNotifBadge(0);
-
-    if (!msgs.length) {
-      box.innerHTML = `<div class="chat-empty">
-        <div class="ce-icon"><i class="ph-thin ph-chat-circle-dots"></i></div>
-        <p>Aucun message pour l'instant</p>
-        <small>Démarrez la conversation !</small>
-      </div>`;
-      return;
-    }
-
-    box.innerHTML = '';
-    let lastDate = '';
-
-    msgs.forEach(m => {
-      const dateKey = m.timestamp.split('T')[0];
-
-      if (dateKey !== lastDate) {
-        lastDate = dateKey;
-        const sep = document.createElement('div');
-        sep.className   = 'chat-date-sep';
-        sep.textContent = new Date(m.timestamp).toLocaleDateString('fr-FR', {
-          weekday: 'long', day: 'numeric', month: 'long',
-        });
-        box.appendChild(sep);
-      }
-
-      const isMine = m.senderId === me.id;
-      const wrap   = document.createElement('div');
-      wrap.className = `msg-wrap ${isMine ? 'sent' : 'recv'}`;
-
-      let bubbleContent;
-      if (m.type === 'audio') {
-        bubbleContent = `
-          <div class="audio-msg-wrap">
-            <span class="audio-msg-icon">🎤</span>
-            <audio class="audio-msg-player" controls data-msg-id="${m.id}"
-                   onplay="loadAudioSrc(this)"></audio>
-          </div>`;
-      } else {
-        bubbleContent = esc(m.content);
-      }
-
-      wrap.innerHTML = `
-        <div class="msg-meta">${isMine ? 'Vous' : esc(m.senderName)}</div>
-        <div class="msg-bubble ${m.type === 'audio' ? 'msg-bubble-audio' : ''}">${bubbleContent}</div>
-        <div class="msg-time">${new Date(m.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>`;
-      box.appendChild(wrap);
-    });
-
-    box.scrollTop = box.scrollHeight;
-
-  } catch { box.innerHTML = '<div class="chat-empty"><p>Erreur de chargement</p></div>'; }
-}
-
-async function sendMessage() {
-  const inp     = document.getElementById('chat-input');
-  const content = inp.value.trim();
-  if (!content) return;
-  inp.value = ''; inp.style.height = 'auto';
-
-  try {
-    await api('/api/messages', 'POST', { content });
-    await loadMessages();
-  } catch (err) { toast(err.message, 'err'); }
-}
-
-function chatKeydown(e) {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-  const inp = e.target;
-  inp.style.height = 'auto';
-  inp.style.height = Math.min(inp.scrollHeight, 120) + 'px';
-}
-
-// Chargement lazy de l'audio au premier play (src vide au rendu)
-async function loadAudioSrc(audioEl) {
-  if (audioEl.src && audioEl.src !== window.location.href) return; // déjà chargé
-  const msgId = audioEl.dataset.msgId;
-  try {
-    const { audioData } = await api(`/api/messages/${msgId}/audio`);
-    audioEl.src = audioData;
-    audioEl.play();
-  } catch { toast('Impossible de charger l\'audio', 'err'); }
-}
-
-// ════════════════════════════════════════════════════════════════
-// ENREGISTREMENT AUDIO
-// ════════════════════════════════════════════════════════════════
-
-async function startRecording() {
-  if (!navigator.mediaDevices?.getUserMedia)
-    return toast('Microphone non disponible sur ce navigateur', 'err');
-
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-    // Choisit le meilleur format supporté
-    const mime = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4','']
-      .find(t => !t || MediaRecorder.isTypeSupported(t));
-
-    mediaRecorder = new MediaRecorder(stream, mime ? { mimeType: mime } : {});
-    audioChunks   = [];
-
-    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
-    mediaRecorder.onstop = () => {
-      audioBlob = new Blob(audioChunks, { type: mime || 'audio/webm' });
-      stream.getTracks().forEach(t => t.stop());
-      showAudioPreview();
-    };
-
-    mediaRecorder.start(200);
-    recordingSeconds = 0;
-
-    // Bascule l'interface en mode enregistrement
-    document.getElementById('text-composer').classList.add('hidden');
-    document.getElementById('audio-record-zone').classList.remove('hidden');
-    document.getElementById('arc-recording-state').classList.remove('hidden');
-    document.getElementById('arc-preview-state').classList.add('hidden');
-    updateRecordTimer();
-
-    recordingInterval = setInterval(() => {
-      recordingSeconds++;
-      updateRecordTimer();
-      if (recordingSeconds >= 120) stopRecording(); // Limite 2 min
-    }, 1000);
-
-  } catch {
-    toast('Accès au microphone refusé. Vérifiez les permissions.', 'err');
-  }
-}
-
-function updateRecordTimer() {
-  const m = Math.floor(recordingSeconds / 60);
-  const s = (recordingSeconds % 60).toString().padStart(2, '0');
-  const el = document.getElementById('arc-timer');
-  if (el) el.textContent = `${m}:${s}`;
-}
-
-function stopRecording() {
-  if (recordingInterval) { clearInterval(recordingInterval); recordingInterval = null; }
-  if (mediaRecorder?.state === 'recording') mediaRecorder.stop();
-}
-
-function showAudioPreview() {
-  document.getElementById('arc-recording-state').classList.add('hidden');
-  document.getElementById('arc-preview-state').classList.remove('hidden');
-  const player = document.getElementById('arc-preview-player');
-  player.src = URL.createObjectURL(audioBlob);
-}
-
-function cancelAudio() {
-  stopRecording();
-  if (audioBlob) { URL.revokeObjectURL(document.getElementById('arc-preview-player').src); }
-  audioBlob = null; audioChunks = [];
-  document.getElementById('audio-record-zone').classList.add('hidden');
-  document.getElementById('text-composer').classList.remove('hidden');
-}
-
-async function sendAudioMessage() {
-  if (!audioBlob) return;
-
-  const btn = document.getElementById('arc-send-audio-btn');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="btn-spinner"></span> Envoi…';
-
-  const reader = new FileReader();
-  reader.onload = async (e) => {
-    try {
-      await api('/api/messages', 'POST', {
-        type: 'audio',
-        audioData: e.target.result,
-        content: '🎤 Message vocal',
-      });
-      cancelAudio();
-      toast('🎤 Message vocal envoyé !', 'ok');
-      loadMessages();
-    } catch (err) {
-      toast(err.message, 'err');
-      btn.disabled = false;
-      btn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg> Envoyer';
-    }
-  };
-  reader.readAsDataURL(audioBlob);
-}
-
-async function pollUnread() {
-  try {
-    const { count } = await api('/api/messages/unread');
-    updateNotifBadge(count);
-  } catch {}
-}
-
-function updateNotifBadge(count) {
-  const dot = document.getElementById('msg-notif-dot');
-  const mob = document.getElementById('msg-badge-mob');
-  if (count > 0) {
-    if (dot) dot.classList.remove('hidden');
-    if (mob) { mob.classList.remove('hidden'); mob.textContent = count > 9 ? '9+' : count; }
-  } else {
-    if (dot) dot.classList.add('hidden');
-    if (mob) mob.classList.add('hidden');
-  }
-}
-
-
-// Cache des données admin pour les modals
-let adminData = { enterprises: [], employees: [], restos: [], choices: [] };
-
-// ────────────────────────────────────────────────────────────────
-//  INLINE RENAME — clic direct sur le nom pour l'éditer
-// ────────────────────────────────────────────────────────────────
-
-function startInlineRename(el) {
-  if (el.classList.contains('editing')) return;
-  el.classList.add('editing');
-  const type        = el.dataset.type;
-  const id          = el.dataset.id;
-  const currentName = el.textContent.trim();
-
-  el.innerHTML = '';
-  const input = document.createElement('input');
-  input.className   = 'inline-rename-input';
-  input.value       = currentName;
-  input._committed  = false;
-
-  input.addEventListener('keydown', e => {
-    if (e.key === 'Enter')  { e.preventDefault(); input._committed = true; commitInlineRename(input, el, type, id, currentName); }
-    if (e.key === 'Escape') { el.classList.remove('editing'); el.textContent = currentName; }
-  });
-  input.addEventListener('blur', () => {
-    if (!input._committed) commitInlineRename(input, el, type, id, currentName);
-  });
-
-  el.appendChild(input);
-  // stop click from bubbling to parent items
-  input.addEventListener('click', e => e.stopPropagation());
-  input.focus();
-  input.select();
-}
-
-async function commitInlineRename(input, el, type, id, original) {
-  input._committed = true;
-  el.classList.remove('editing');
-  const newName = input.value.trim();
-
-  if (!newName || newName === original) { el.textContent = original; return; }
-
-  try {
-    await api(`/api/admin/users/${type}/${id}`, 'PATCH', { newName });
-    el.textContent = newName;
-    // Mettre à jour le cache local
-    if (type === 'enterprise')   { const e = adminData.enterprises.find(x => x.id === id); if (e) e.companyName = newName; }
-    else if (type === 'employee'){ const e = adminData.employees.find(x => x.id === id);   if (e) e.fullName    = newName; }
-    else                         { const r = adminData.restos.find(x => x.id === id);       if (r) r.fullName    = newName; }
-    toast('Nom mis à jour !', 'ok');
-  } catch (err) {
-    el.textContent = original;
-    toast(err.message || 'Erreur lors de la mise à jour.', 'err');
-  }
-}
-
-async function loadAdminDashboard() {
-  if (me.role !== 'superadmin') return;
-
-  try {
-    const [enterprises, employees, restos, todayChoices, history] = await Promise.all([
-      api('/api/admin/enterprises'),
-      api('/api/admin/employees'),
-      api('/api/admin/restauratrices'),
-      api('/api/admin/choices/today'),
-      api('/api/admin/history'),
-    ]);
-
-    adminData = { enterprises, employees, restos, choices: todayChoices };
-
-    // Stats
-    document.getElementById('admin-stats-grid').innerHTML = `
-      <div class="admin-stat-card"><div class="asc-icon orange"><i class="ph-fill ph-buildings"></i></div><div><div class="asc-num">${enterprises.length}</div><div class="asc-label">Entreprises</div></div></div>
-      <div class="admin-stat-card"><div class="asc-icon blue"><i class="ph-fill ph-users"></i></div><div><div class="asc-num">${employees.length}</div><div class="asc-label">Employés</div></div></div>
-      <div class="admin-stat-card"><div class="asc-icon green"><i class="ph-fill ph-fork-knife"></i></div><div><div class="asc-num">${todayChoices.length}</div><div class="asc-label">Commandes aujourd'hui</div></div></div>
-      <div class="admin-stat-card"><div class="asc-icon purple"><i class="ph-fill ph-chef-hat"></i></div><div><div class="asc-num">${restos.length}</div><div class="asc-label">Restauratrices</div></div></div>`;
-
-    // Entreprises
-    document.getElementById('admin-ent-count').textContent = enterprises.length;
-    document.getElementById('admin-enterprises-list').innerHTML = enterprises.length
-      ? enterprises.map((ent, i) => {
-          const entEmps = employees.filter(e => e.enterpriseId === ent.id);
-          return `<div class="admin-ent-item" style="animation-delay:${i * 0.05}s">
-            <div class="aei-header">
-              <div class="aei-icon"></div>
-              <div class="aei-info">
-                <div class="aei-name admin-editable-name" data-type="enterprise" data-id="${ent.id}" onclick="startInlineRename(this)" title="Cliquer pour renommer">${esc(ent.companyName)}</div>
-                <div class="aei-domain">${esc(ent.domain)} — ${entEmps.length} employé(s) — Créée le ${new Date(ent.createdAt).toLocaleDateString('fr-FR')}</div>
-              </div>
-              <div class="admin-item-actions">
-                <button class="aia-btn aia-edit" title="Renommer" onclick="openAdminRenameModal('enterprise','${ent.id}')">
-                  <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zm-2.207 2.207L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
-                </button>
-                <button class="aia-btn aia-del" title="Supprimer" onclick="adminDeleteUser('enterprise','${ent.id}')">
-                  <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
-                </button>
-              </div>
-            </div>
-            <div class="aei-employees">
-              ${entEmps.length
-                ? entEmps.map(e => `<span class="aei-emp-chip"><i class="ph-bold ph-user"></i> ${esc(e.fullName)}</span>`).join('')
-                : '<span style="font-size:.78rem;color:var(--ink5)">Aucun employé</span>'}
-            </div>
-          </div>`;
-        }).join('')
-      : '<div class="empty-hist"><p>Aucune entreprise inscrite</p></div>';
-
-    // Employés
-    document.getElementById('admin-emp-count').textContent = employees.length;
-    document.getElementById('admin-employees-list').innerHTML = employees.length
-      ? employees.map((emp, i) => {
-          const entName = enterprises.find(e => e.id === emp.enterpriseId)?.companyName || '—';
-          return `<div class="admin-user-item" style="animation-delay:${i * 0.04}s">
-            <div class="aui-avatar">${initials(emp.fullName)}</div>
-            <div class="aui-info">
-              <div class="aui-name admin-editable-name" data-type="employee" data-id="${emp.id}" onclick="startInlineRename(this)" title="Cliquer pour renommer">${esc(emp.fullName)}</div>
-              <div class="aui-sub"><i class="ph-bold ph-buildings"></i> ${esc(entName)}</div>
-            </div>
-            <div class="admin-item-actions">
-              <button class="aia-btn aia-edit" title="Renommer" onclick="openAdminRenameModal('employee','${emp.id}')">
-                <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zm-2.207 2.207L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
-              </button>
-              <button class="aia-btn aia-del" title="Supprimer" onclick="adminDeleteUser('employee','${emp.id}')">
-                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
-              </button>
-            </div>
-          </div>`;
-        }).join('')
-      : '<div class="empty-hist"><p>Aucun employé inscrit</p></div>';
-
-    // Restauratrices
-    document.getElementById('admin-restos-count').textContent = restos.length;
-    document.getElementById('admin-restos-list').innerHTML = restos.length
-      ? restos.map((r, i) => {
-          const entName = enterprises.find(e => e.id === r.enterpriseId)?.companyName || '—';
-          return `<div class="admin-user-item" style="animation-delay:${i * 0.04}s">
-            <div class="aui-avatar aui-avatar-green">${initials(r.fullName)}</div>
-            <div class="aui-info">
-              <div class="aui-name admin-editable-name" data-type="restauratrice" data-id="${r.id}" onclick="startInlineRename(this)" title="Cliquer pour renommer">${esc(r.fullName)}</div>
-              <div class="aui-sub"><i class="ph-bold ph-buildings"></i> ${esc(entName)}</div>
-            </div>
-            <div class="admin-item-actions">
-              <button class="aia-btn aia-edit" title="Renommer" onclick="openAdminRenameModal('restauratrice','${r.id}')">
-                <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zm-2.207 2.207L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
-              </button>
-              <button class="aia-btn aia-del" title="Supprimer" onclick="adminDeleteUser('restauratrice','${r.id}')">
-                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
-              </button>
-            </div>
-          </div>`;
-        }).join('')
-      : '<div class="empty-hist"><p>Aucune restauratrice inscrite</p></div>';
-
-    // Commandes du jour
-    document.getElementById('admin-choices-count').textContent = todayChoices.length;
-    document.getElementById('admin-choices-list').innerHTML = todayChoices.length
-      ? todayChoices.map((c, i) => {
-          const f       = findFood(c.food);
-          const entName = enterprises.find(e => e.id === c.enterpriseId)?.companyName || '';
-          return `<div class="choice-card admin-choice-card" style="animation-delay:${i * 0.04}s">
-            <div class="cc-head">
-              <div class="cc-av">${initials(c.userName)}</div>
-              <div>
-                <div class="cc-nm">${esc(c.userName)}</div>
-                <div style="font-size:.72rem;color:var(--s1);font-weight:600"> ${esc(entName)}</div>
-              </div>
-            </div>
-            <div class="cc-food">${f.emoji} ${esc(f.label)}</div>
-            ${c.food === 'Autres' && c.customFood ? `<div class="cc-custom">${esc(c.customFood)}</div>` : ''}
-            <div class="admin-choice-actions">
-              <button class="aia-btn aia-edit" title="Modifier" onclick="openAdminChoiceModal('${c.id}')">
-                <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zm-2.207 2.207L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
-              </button>
-              <button class="aia-btn aia-del" title="Supprimer" onclick="adminDeleteChoice('${c.id}')">
-                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
-              </button>
-            </div>
-          </div>`;
-        }).join('')
-      : '<div class="empty-grid"><div class="eg-icon"><i class="ph-thin ph-bowl-food"></i></div><p>Aucune commande aujourd\'hui</p></div>';
-
-    // Historique global
-    document.getElementById('admin-history-list').innerHTML = history.length
-      ? history.slice(0, 50).map((c, i) => {
-          const f       = findFood(c.food);
-          const d       = new Date(c.date);
-          const entName = enterprises.find(e => e.id === c.enterpriseId)?.companyName || '';
-          return `<div class="history-item" style="animation-delay:${i * 0.02}s">
-            <div class="hi-date-block">
-              <span class="hi-day">${d.getDate().toString().padStart(2, '0')}</span>
-              <span class="hi-month">${d.toLocaleDateString('fr-FR', { month: 'short' })}</span>
-            </div>
-            <div>
-              <div class="hi-food-name">${f.emoji} ${esc(f.label)}</div>
-              <div style="font-size:.78rem;color:var(--ink4);margin-top:2px">
-                <i class="ph-bold ph-user"></i> ${esc(c.userName)} ${entName ? `—  ${esc(entName)}` : ''}
-              </div>
-            </div>
-            <span class="hi-st ${c.orderLaunched ? 'ok' : 'wait'}">${c.orderLaunched ? '<i class="ph-fill ph-check-circle"></i>' : '<i class="ph-fill ph-hourglass-medium"></i>'}</span>
-          </div>`;
-        }).join('')
-      : '<div class="empty-hist"><p>Aucun historique</p></div>';
-
-  } catch (err) { console.error('Admin dashboard error:', err); }
-}
-
-
-async function downloadPDF() {
-  try {
-    const all      = await api('/api/choices/today');
-    const { jsPDF } = window.jspdf;
-    const doc      = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-    const today    = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-    const todayStr = new Date().toISOString().split('T')[0];
-
-    doc.setFillColor(249, 115, 22); doc.rect(0, 0, 210, 38, 'F');
-    doc.setTextColor(255, 255, 255); doc.setFontSize(22); doc.setFont('helvetica', 'bold');
-    doc.text('LunchApp', 15, 16);
-    doc.setFontSize(11); doc.setFont('helvetica', 'normal');
-    doc.text(`Commandes — ${me.companyName || ''}`, 15, 25);
-    doc.setFontSize(10); doc.text(today.charAt(0).toUpperCase() + today.slice(1), 15, 33);
-
-    const counts = {};
-    all.forEach(c => { const k = c.food === 'Autres' ? (c.customFood || 'Autre') : c.food; counts[k] = (counts[k] || 0) + 1; });
-    const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-
-    let y = 48;
-    doc.setTextColor(30, 41, 59); doc.setFontSize(13); doc.setFont('helvetica', 'bold');
-    doc.text('RÉSUMÉ DES COMMANDES', 15, y); y += 2;
-    doc.setDrawColor(249, 115, 22); doc.setLineWidth(0.8); doc.line(15, y + 1, 100, y + 1); y += 8;
-
-    doc.setFontSize(10);
-    entries.forEach(([name, count], i) => {
-      const food = FOODS.find(f => f.id === name) || { label: name };
-      const lbl  = food.label === 'Autres (préciser)' ? name : food.label;
-      if (i % 2 === 0) { doc.setFillColor(248, 250, 252); doc.rect(13, y - 5, 184, 8, 'F'); }
-      doc.setFont('helvetica', 'normal'); doc.setTextColor(30, 41, 59); doc.text(lbl, 18, y);
-      doc.setFont('helvetica', 'bold'); doc.setTextColor(249, 115, 22); doc.text(`× ${count}`, 175, y, { align: 'right' });
-      y += 10;
-    });
-
-    y += 4; doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.3); doc.line(15, y, 195, y); y += 8;
-    doc.setFillColor(249, 115, 22); doc.rect(13, y - 6, 184, 10, 'F');
-    doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255); doc.setFontSize(11);
-    doc.text('TOTAL', 18, y); doc.text(`${all.length} repas`, 175, y, { align: 'right' }); y += 18;
-
-    doc.setTextColor(30, 41, 59); doc.setFontSize(13); doc.setFont('helvetica', 'bold');
-    doc.text('DÉTAIL PAR EMPLOYÉ', 15, y); y += 2;
-    doc.setDrawColor(56, 189, 248); doc.setLineWidth(0.8); doc.line(15, y + 1, 120, y + 1); y += 8;
-
-    doc.setFillColor(14, 165, 233); doc.rect(13, y - 5, 184, 8, 'F');
-    doc.setTextColor(255, 255, 255); doc.setFontSize(9); doc.setFont('helvetica', 'bold');
-    doc.text('N°', 18, y); doc.text('Employé', 30, y); doc.text('Repas', 100, y); doc.text('Heure', 175, y, { align: 'right' }); y += 10;
-
-    all.forEach((c, i) => {
-      if (y > 270) { doc.addPage(); y = 20; }
-      const food  = findFood(c.food);
-      const label = c.food === 'Autres' ? (c.customFood || 'Autre') : food.label;
-      const heure = new Date(c.updatedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-      if (i % 2 === 0) { doc.setFillColor(248, 250, 252); doc.rect(13, y - 5, 184, 8, 'F'); }
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
-      doc.setTextColor(100, 116, 139); doc.text(`${i + 1}`, 18, y);
-      doc.setTextColor(30, 41, 59); doc.text(c.userName.slice(0, 25), 30, y); doc.text(label.slice(0, 35), 100, y);
-      doc.setTextColor(100, 116, 139); doc.text(heure, 175, y, { align: 'right' }); y += 9;
-    });
-
-    const pH = doc.internal.pageSize.getHeight();
-    doc.setFillColor(249, 115, 22); doc.rect(0, pH - 14, 210, 14, 'F');
-    doc.setTextColor(255, 255, 255); doc.setFontSize(8); doc.setFont('helvetica', 'normal');
-    doc.text(`LunchApp — Généré le ${new Date().toLocaleString('fr-FR')}`, 15, pH - 5);
-    doc.text(`${all.length} repas`, 195, pH - 5, { align: 'right' });
-
-    doc.save(`commande_${(me.companyName || 'lunchapp').replace(/\s+/g, '_')}_${todayStr}.pdf`);
-    toast('📄 PDF téléchargé !', 'ok');
-
-  } catch (err) { console.error(err); toast('Erreur PDF', 'err'); }
-}
-
-
-function checkPwdStrength(val) {
-  const bar   = document.getElementById('pwd-strength-bar');
-  const fill  = document.getElementById('pwd-strength-fill');
-  const label = document.getElementById('pwd-strength-label');
-  const rules = {
-    len:     /^.{8,}$/,
-    upper:   /[A-Z]/,
-    lower:   /[a-z]/,
-    num:     /[0-9]/,
-    special: /[!@#$%^&*()\-_=+[\]{};:'",.<>?/\\|`~]/,
-  };
-
-  if (!val) { bar.classList.add('hidden'); return; }
-  bar.classList.remove('hidden');
-
-  let score = 0;
-  Object.entries(rules).forEach(([key, regex]) => {
-    const ok = regex.test(val);
-    if (ok) score++;
-    const el = document.getElementById(`rule-${key}`);
-    if (el) {
-      el.classList.toggle('ok', ok);
-      const text = el.textContent.replace(/^[○✓]\s/, '');
-      el.textContent = (ok ? '✓' : '○') + ' ' + text;
-    }
-  });
-
-  const pct = (score / 5) * 100;
-  fill.style.width = pct + '%';
-
-  const levels = [
-    { max: 2, bg: 'var(--red)',   txt: 'Faible',  color: 'var(--red)' },
-    { max: 3, bg: 'var(--o1)',    txt: 'Moyen',   color: 'var(--o1)' },
-    { max: 4, bg: 'var(--s1)',    txt: 'Bien',    color: 'var(--s1)' },
-    { max: 5, bg: 'var(--green)', txt: 'Fort ✓', color: 'var(--green)' },
-  ];
-  const lv = levels.find(l => score <= l.max) || levels[3];
-  fill.style.background = lv.bg;
-  label.textContent     = lv.txt;
-  label.style.color     = lv.color;
-}
-
-
-// Requête HTTP centralisée
-async function api(url, method = 'GET', body) {
+// ─── Modals ───────────────────────────────────────────────────────────────────
+function openModal(id) { el(id).classList.remove('hidden'); }
+function closeModal(id) { el(id).classList.add('hidden'); }
+
+// ─── API helper ───────────────────────────────────────────────────────────────
+async function api(method, path, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
-  if (token) opts.headers['Authorization'] = `Bearer ${token}`;
-  if (body)  opts.body = JSON.stringify(body);
-  const res  = await fetch(url, opts);
-  const ct   = res.headers.get('content-type') || '';
+  if (token) opts.headers['Authorization'] = 'Bearer ' + token;
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
   let data;
-  if (ct.includes('application/json')) {
-    data = await res.json();
-  } else {
-    const text = await res.text();
-    data = { error: text.startsWith('<!') ? `Erreur serveur (${res.status})` : (text || `Erreur ${res.status}`) };
-  }
-  if (!res.ok) { const e = new Error(data.error || 'Erreur serveur'); e.status = res.status; throw e; }
+  try { data = await r.json(); } catch { data = {}; }
+  if (!r.ok) throw new Error(data.error || `Erreur ${r.status}`);
   return data;
 }
 
-// Trouve un plat par son id
-function findFood(id) { return FOODS.find(f => f.id === id) || { emoji: '🍽️', label: id }; }
-
-// Génère les initiales d'un nom (ex: "Jean Dupont" → "JD")
-function initials(name) { return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2); }
-
-// Échappe les caractères HTML (protection XSS)
-function esc(s) {
-  return String(s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+// ─── Password helpers ─────────────────────────────────────────────────────────
+function toggleEye(inputId, btn) {
+  const inp = el(inputId);
+  if (inp.type === 'password') { inp.type = 'text'; btn.textContent = '🙈'; }
+  else                         { inp.type = 'password'; btn.textContent = '👁'; }
+}
+function pwdMeter(input, meterId) {
+  const v = input.value;
+  let score = 0;
+  if (v.length >= 8) score++;
+  if (/[A-Z]/.test(v)) score++;
+  if (/[0-9]/.test(v)) score++;
+  if (/[@$!%*?&._-]/.test(v)) score++;
+  const labels = ['', 'Faible', 'Moyen', 'Bon', 'Fort'];
+  const colors = ['', '#EF4444', '#F97316', '#0EA5E9', '#22C55E'];
+  const m = el(meterId);
+  m.textContent = score ? labels[score] : '';
+  m.style.color = colors[score] || '';
 }
 
-function showErr(id, msg)    { const e = document.getElementById(id); if (e) { e.textContent = msg; e.classList.remove('hidden'); } }
-function clearErr(id)        { const e = document.getElementById(id); if (e) e.classList.add('hidden'); }
-function setModalErr(msg)    { const e = document.getElementById('modal-error');       e.textContent = msg; e.classList.remove('hidden'); }
-function setEmpModalErr(m)   { const e = document.getElementById('emp-modal-error');   e.textContent = m;   e.classList.remove('hidden'); }
-function setRestoModalErr(m) { const e = document.getElementById('resto-modal-error'); e.textContent = m;   e.classList.remove('hidden'); }
-
-// Affiche une notification toast (ok=vert | err=rouge | info=bleu)
-function toast(msg, type = 'info') {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.className   = `toast t-${type} visible`;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('visible'), 3500);
+// ─── Pay entries ──────────────────────────────────────────────────────────────
+function addPayEntry(containerId) {
+  const div = document.createElement('div');
+  div.className = 'pay-entry';
+  div.innerHTML = `<select class="pay-type"><option value="">Type</option>
+    <option value="OM">Orange Money</option><option value="Wave">Wave</option>
+    <option value="Moov">Moov Money</option><option value="Telecash">Telecash</option></select>
+    <input type="text" class="pay-num" placeholder="Numéro / code agent"/>
+    <button type="button" class="btn danger sm" onclick="this.parentElement.remove()">✕</button>`;
+  el(containerId).appendChild(div);
+}
+function collectPayEntries(containerId) {
+  return Array.from(el(containerId).querySelectorAll('.pay-entry')).map(d => ({
+    type: d.querySelector('.pay-type').value,
+    number: d.querySelector('.pay-num').value.trim(),
+  })).filter(p => p.type && p.number);
 }
 
-// ════════════════════════════════════════════════════════════════
-//  ADMIN — RENOMMER UN UTILISATEUR
-// ════════════════════════════════════════════════════════════════
-
-let adminRenameCtx = { type: null, id: null };
-let adminChoiceCtx = { id: null, selectedFood: null };
-
-function openAdminRenameModal(type, id) {
-  adminRenameCtx = { type, id };
-  let currentName = '', domain = '';
-  if (type === 'enterprise') {
-    const ent = adminData.enterprises.find(e => e.id === id);
-    currentName = ent?.companyName || '';
-    domain      = ent?.domain      || '';
-  } else if (type === 'employee') {
-    currentName = adminData.employees.find(e => e.id === id)?.fullName || '';
-  } else if (type === 'restauratrice') {
-    currentName = adminData.restos.find(r => r.id === id)?.fullName || '';
-  }
-
-  const titles = { enterprise: 'Renommer l\'entreprise', employee: 'Renommer l\'employé', restauratrice: 'Renommer la restauratrice' };
-  document.getElementById('admin-rename-title').textContent      = titles[type] || 'Renommer';
-  document.getElementById('admin-rename-sub').textContent        = `Actuellement : ${currentName}`;
-  document.getElementById('admin-rename-label').textContent      = type === 'enterprise' ? 'Nouveau nom de l\'entreprise' : 'Nouveau nom complet';
-  document.getElementById('admin-rename-input').value            = currentName;
-  document.getElementById('admin-rename-error').classList.add('hidden');
-
-  const domainField = document.getElementById('admin-rename-domain-field');
-  if (type === 'enterprise') {
-    domainField.classList.remove('hidden');
-    document.getElementById('admin-rename-domain').value = domain;
-  } else {
-    domainField.classList.add('hidden');
-  }
-  document.getElementById('admin-rename-modal').classList.remove('hidden');
+// ─── Navigation screens ───────────────────────────────────────────────────────
+function showLanding() {
+  el('screen-landing').classList.remove('hidden');
+  el('screen-auth').classList.add('hidden');
+  el('screen-app').classList.add('hidden');
+}
+function showAuth(tab) {
+  el('screen-landing').classList.add('hidden');
+  el('screen-auth').classList.remove('hidden');
+  el('screen-app').classList.add('hidden');
+  authTab(tab || 'login');
+}
+function authTab(tab) {
+  el('pane-login').classList.toggle('hidden', tab !== 'login');
+  el('pane-register').classList.toggle('hidden', tab !== 'register');
+  el('pane-forgot').classList.add('hidden');
+  el('pane-reset').classList.add('hidden');
+  el('tab-login').classList.toggle('active', tab === 'login');
+  el('tab-register').classList.toggle('active', tab === 'register');
 }
 
-function closeAdminRenameModal() {
-  document.getElementById('admin-rename-modal').classList.add('hidden');
+function showForgot() {
+  el('pane-login').classList.add('hidden');
+  el('pane-register').classList.add('hidden');
+  el('pane-forgot').classList.remove('hidden');
+  el('pane-reset').classList.add('hidden');
 }
 
-async function submitAdminRename() {
-  const { type, id } = adminRenameCtx;
-  const newName = document.getElementById('admin-rename-input').value.trim();
-  const errEl   = document.getElementById('admin-rename-error');
-  if (!newName) { errEl.textContent = 'Le nom ne peut pas être vide.'; errEl.classList.remove('hidden'); return; }
+function showLogin() {
+  authTab('login');
+}
 
-  const body = { newName };
-  if (type === 'enterprise') {
-    const domain = document.getElementById('admin-rename-domain').value.trim();
-    if (domain) body.newDomain = domain;
-  }
-
+async function doForgot() {
+  const email = el('forgot-email').value.trim();
+  if (!email) { toast('Entrez votre email', 'error'); return; }
   try {
-    await api(`/api/admin/users/${type}/${id}`, 'PATCH', body);
-    closeAdminRenameModal();
-    toast('Nom mis à jour !', 'ok');
-    loadAdminDashboard();
-  } catch (err) {
-    errEl.textContent = err.message || 'Erreur lors de la mise à jour.';
-    errEl.classList.remove('hidden');
+    const d = await api('POST', '/api/auth/forgot-password', { email });
+    toast(d.message, 'success');
+    el('forgot-email').value = '';
+    setTimeout(showLogin, 2500);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function doResetPassword() {
+  const token   = el('reset-token').value;
+  const newPwd  = el('reset-pwd').value;
+  if (!newPwd) { toast('Entrez un nouveau mot de passe', 'error'); return; }
+  try {
+    const d = await api('POST', '/api/auth/reset-password', { token, newPassword: newPwd });
+    toast(d.message, 'success');
+    // Nettoyer l'URL et retourner à la connexion
+    history.replaceState({}, '', '/');
+    setTimeout(showLogin, 1500);
+  } catch (e) { toast(e.message, 'error'); }
+}
+function switchRegType(type) {
+  el('reg-ent').classList.toggle('hidden', type !== 'enterprise');
+  el('reg-rst').classList.toggle('hidden', type !== 'restaurant');
+}
+
+// ─── Panes ────────────────────────────────────────────────────────────────────
+function showPane(id) {
+  document.querySelectorAll('.pane').forEach(p => p.classList.add('hidden'));
+  const target = el('pane-' + id);
+  if (target) {
+    target.classList.remove('hidden');
+    // Sidebar highlight
+    document.querySelectorAll('.sidebar-item').forEach(b => b.classList.remove('active'));
+    const btn = document.querySelector(`.sidebar-item[data-pane="${id}"]`);
+    if (btn) btn.classList.add('active');
+    // Auto-load
+    onPaneLoad(id);
+  }
+}
+function onPaneLoad(id) {
+  switch (id) {
+    case 'resto-home':      loadRestoHome(); break;
+    case 'menus':           loadMenus(); break;
+    case 'clientele':       loadClientele(); break;
+    case 'rst-messages':    loadConversations(''); break;
+    case 'ent-today':       loadEntToday(); break;
+    case 'ent-restaurants': loadEntRestaurants(); break;
+    case 'ent-menus':       loadEntMenus(); break;
+    case 'ent-employees':   loadEntEmployees(); loadEntOrders(); loadEntStats(); break;
+    case 'ent-messages':    loadConversations('ent'); break;
+    case 'emp-menu':        loadEmpMenu(); break;
+    case 'emp-history':     loadEmpHistory(); break;
+    case 'admin':           loadAdminStats(); break;
+    case 'notifs':          loadNotifs(); break;
   }
 }
 
-async function adminDeleteUser(type, id) {
-  let name = '';
-  if (type === 'enterprise')   name = adminData.enterprises.find(e => e.id === id)?.companyName || id;
-  else if (type === 'employee') name = adminData.employees.find(e => e.id === id)?.fullName || id;
-  else if (type === 'restauratrice') name = adminData.restos.find(r => r.id === id)?.fullName || id;
-
-  const labels = {
-    enterprise:   `l'entreprise "${name}" et toutes ses données (employés, restauratrices, commandes)`,
-    employee:     `l'employé "${name}"`,
-    restauratrice:`la restauratrice "${name}"`,
+// ─── Sidebar ──────────────────────────────────────────────────────────────────
+function buildSidebar(role) {
+  const items = {
+    restauratrice: [
+      { id: 'resto-home', icon: '🏠', label: 'Accueil & Stats' },
+      { id: 'menus',      icon: '📝', label: 'Mes plats' },
+      { id: 'clientele',  icon: '👥', label: 'Clientèle' },
+      { id: 'rst-messages', icon: '💬', label: 'Messages' },
+    ],
+    enterprise: [
+      { id: 'ent-today',       icon: '📋', label: 'Aujourd\'hui' },
+      { id: 'ent-restaurants', icon: '🍴', label: 'Restaurants' },
+      { id: 'ent-menus',       icon: '🗒️', label: 'Menus' },
+      { id: 'ent-employees',   icon: '👥', label: 'Employés & Stats' },
+      { id: 'ent-messages',    icon: '💬', label: 'Messages' },
+    ],
+    employee: [
+      { id: 'emp-menu',    icon: '🍽️', label: 'Menu du jour' },
+      { id: 'emp-history', icon: '📜', label: 'Mon historique' },
+    ],
+    superadmin: [
+      { id: 'admin', icon: '⚙️', label: 'Administration' },
+    ],
   };
-  if (!confirm(`Supprimer ${labels[type] || name} ?\nCette action est irréversible.`)) return;
-
-  try {
-    await api(`/api/admin/users/${type}/${id}`, 'DELETE');
-    toast('Supprimé avec succès.', 'ok');
-    loadAdminDashboard();
-  } catch (err) {
-    toast(err.message || 'Erreur lors de la suppression.', 'err');
-  }
+  const nav = el('sidebar');
+  nav.innerHTML = (items[role] || []).map(it =>
+    `<button class="sidebar-item" data-pane="${it.id}" onclick="showPane('${it.id}')">${it.icon} ${it.label}</button>`
+  ).join('');
 }
 
-// ════════════════════════════════════════════════════════════════
-//  ADMIN — MODIFIER / SUPPRIMER UNE COMMANDE
-// ════════════════════════════════════════════════════════════════
+// ─── Login / Register / Logout ────────────────────────────────────────────────
+async function doLogin() {
+  const type  = document.querySelector('input[name="ltype"]:checked')?.value;
+  const email = el('l-id').value.trim();
+  const pwd   = el('l-pwd').value;
+  if (!email || !pwd) { toast('Remplissez tous les champs', 'error'); return; }
+  try {
+    const d = await api('POST', '/api/login', { email, password: pwd, type });
+    token = d.token;
+    me    = d.user;
+    localStorage.setItem('la_token', token);
+    localStorage.setItem('la_user', JSON.stringify(me));
+    startApp();
+  } catch (e) { toast(e.message, 'error'); }
+}
 
-function openAdminChoiceModal(choiceId) {
-  const c = adminData.choices.find(ch => ch.id === choiceId);
-  if (!c) return;
-  adminChoiceCtx = { id: choiceId, selectedFood: c.food };
+async function doRegister(type) {
+  try {
+    let d;
+    if (type === 'enterprise') {
+      const companyName = el('r-company').value.trim();
+      const email    = el('r-email').value.trim();
+      const phone    = el('r-phone').value.trim();
+      const location = el('r-location').value.trim();
+      const password = el('r-pwd').value;
+      d = await api('POST', '/api/enterprise/register', { companyName, email, phone, location, password });
+    } else {
+      const restaurantName = el('r-rname').value.trim();
+      const fullName       = el('r-owner').value.trim();
+      const email          = el('r-remail').value.trim();
+      const phone          = el('r-rphone').value.trim();
+      const address        = el('r-addr').value.trim();
+      const specialty      = el('r-spec').value.trim();
+      const paymentInfo    = collectPayEntries('pay-entries');
+      const password       = el('r-rpwd').value;
+      d = await api('POST', '/api/restauratrice/register', { restaurantName, fullName, email, phone, address, specialty, paymentInfo, password });
+    }
+    token = d.token;
+    me    = d.user;
+    localStorage.setItem('la_token', token);
+    localStorage.setItem('la_user', JSON.stringify(me));
+    toast('Compte créé avec succès !', 'success');
+    startApp();
+  } catch (e) { toast(e.message, 'error'); }
+}
 
-  document.getElementById('admin-choice-sub').textContent = `Commande de ${c.userName}`;
-  document.getElementById('admin-choice-food-grid').innerHTML = FOODS.map(f => `
-    <div class="food-opt${f.id === c.food ? ' sel' : ''}${f.id === 'Autres' ? ' autres-opt' : ''}"
-         onclick="selectAdminChoiceFood('${f.id}',this)">
-      <span class="fo-em">${f.emoji}</span><span>${f.label}</span>
-    </div>`).join('');
+function doLogout() {
+  localStorage.removeItem('la_token');
+  localStorage.removeItem('la_user');
+  token = null; me = null;
+  if (sseSource) { sseSource.close(); sseSource = null; }
+  showLanding();
+}
 
-  const customWrap = document.getElementById('admin-choice-custom');
-  if (c.food === 'Autres') {
-    customWrap.classList.remove('hidden');
-    document.getElementById('admin-choice-custom-input').value = c.customFood || '';
+// ─── App init ─────────────────────────────────────────────────────────────────
+function startApp() {
+  el('screen-landing').classList.add('hidden');
+  el('screen-auth').classList.add('hidden');
+  el('screen-app').classList.remove('hidden');
+
+  el('uname').textContent = me.companyName || me.restaurantName || me.fullName || 'Admin';
+  const roleLabels = { enterprise: 'Entreprise', restauratrice: 'Restaurant', employee: 'Employé', superadmin: 'Admin' };
+  el('urole').textContent = roleLabels[me.role] || me.role;
+
+  buildSidebar(me.role);
+  connectSSE();
+
+  // Show first pane per role
+  const first = { restauratrice: 'resto-home', enterprise: 'ent-today', employee: 'emp-menu', superadmin: 'admin' };
+  showPane(first[me.role] || 'notifs');
+}
+
+// ─── SSE ──────────────────────────────────────────────────────────────────────
+function connectSSE() {
+  if (sseSource) sseSource.close();
+  sseSource = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
+  sseSource.addEventListener('notification', e => {
+    const notif = JSON.parse(e.data);
+    updateNotifBadge();
+    toast(notif.title + ': ' + notif.message, 'info');
+  });
+  sseSource.onerror = () => setTimeout(connectSSE, 5000);
+}
+
+async function updateNotifBadge() {
+  try {
+    const notifs = await api('GET', '/api/notifications');
+    const unread = notifs.filter(n => !n.read).length;
+    const badge = el('notif-count');
+    badge.textContent = unread;
+    badge.classList.toggle('hidden', unread === 0);
+  } catch {}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RESTAURANT — Accueil & Stats
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadRestoHome() {
+  try {
+    const r = await api('GET', '/api/restaurant/me');
+    el('resto-profile-view').innerHTML = `
+      <div class="profile-card">
+        ${r.photo ? `<img src="${esc(r.photo)}" class="profile-photo"/>` : '<div class="profile-photo-placeholder">🍴</div>'}
+        <div class="profile-info">
+          <h2>${esc(r.restaurantName)}</h2>
+          <p>${esc(r.fullName)} · ${esc(r.phone || '')}</p>
+          ${r.specialty ? `<p><em>${esc(r.specialty)}</em></p>` : ''}
+          ${r.address ? `<p>📍 ${esc(r.address)}</p>` : ''}
+          ${r.description ? `<p>${esc(r.description)}</p>` : ''}
+          ${r.paymentInfo?.length ? `<p>💳 ${r.paymentInfo.map(p => `${p.type}: ${esc(p.number)}`).join(' | ')}</p>` : ''}
+        </div>
+        <button class="btn ghost sm" onclick="openProfileModal()">✏️ Modifier</button>
+      </div>`;
+    await loadRestoStats();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function loadRestoStats() {
+  const freq = el('rst-freq')?.value || 'monthly';
+  try {
+    const s = await api('GET', `/api/stats/restaurant?frequency=${freq}`);
+    const topItems = Object.entries(s.itemCounts || {}).sort((a,b) => b[1]-a[1]).slice(0,5);
+    el('rst-stats').innerHTML = `
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-num">${s.totalOrders}</div><div class="stat-lbl">Commandes</div></div>
+        <div class="stat-card"><div class="stat-num">${fmtPrice(s.totalRevenue)}</div><div class="stat-lbl">Recettes</div></div>
+        <div class="stat-card"><div class="stat-num">${s.avgRating ? s.avgRating.toFixed(1) + ' ⭐' : '—'}</div><div class="stat-lbl">Note moy. (${s.ratingCount})</div></div>
+      </div>
+      ${topItems.length ? `<h4>Plats les + demandés</h4><ul class="item-list">${topItems.map(([n,c]) => `<li>${esc(n)} <span class="badge">${c}</span></li>`).join('')}</ul>` : ''}`;
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function pdfRestoStats() {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.text('Statistiques Restaurant — LunchApp', 14, 16);
+  doc.text(el('rst-stats').innerText, 14, 30);
+  doc.save('stats-restaurant.pdf');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RESTAURANT — Menus
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadMenus() {
+  try {
+    const menu = await api('GET', '/api/restaurant/menu');
+    const items = menu.items || [];
+    const foods  = items.filter(i => i.category === 'food');
+    const drinks = items.filter(i => i.category === 'drink');
+
+    function renderItems(arr) {
+      if (!arr.length) return '<p class="empty">Aucun article.</p>';
+      return arr.map(i => {
+        _menuItemCache[i.id] = i;
+        return `<div class="item-row">
+          <div class="item-main">
+            <span class="item-name">${esc(i.name)}</span>
+            ${i.description ? `<span class="item-desc">${esc(i.description)}</span>` : ''}
+          </div>
+          <span class="item-price">${fmtPrice(i.price)}</span>
+          <button class="btn ghost sm" onclick="openItemModal('${i.id}')">✏️</button>
+          <button class="btn danger sm" onclick="deleteItem('${i.id}')">🗑️</button>
+        </div>`;
+      }).join('');
+    }
+
+    el('full-menu-list').innerHTML = `
+      <div class="pane-header" style="margin-top:8px">
+        <h3>🍽️ Nourriture (${foods.length})</h3>
+        <button class="btn primary sm" onclick="openItemModal(null,'food')">+ Plat</button>
+      </div>${renderItems(foods)}
+      <div class="pane-header" style="margin-top:16px">
+        <h3>🥤 Boissons (${drinks.length})</h3>
+        <button class="btn primary sm" onclick="openItemModal(null,'drink')">+ Boisson</button>
+      </div>${renderItems(drinks)}`;
+
+    // Daily menu
+    if (!el('day-label').textContent) el('day-label').textContent = fmtDate(_dailyDate);
+    await loadDailyMenu(items);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function shiftDay(n) {
+  const d = new Date(_dailyDate + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  _dailyDate = d.toISOString().slice(0, 10);
+  el('day-label').textContent = fmtDate(_dailyDate);
+  loadDailyMenuOnly();
+}
+
+async function loadDailyMenuOnly() {
+  try {
+    const menu = await api('GET', '/api/restaurant/menu');
+    await loadDailyMenu(menu.items || []);
+  } catch {}
+}
+
+async function loadDailyMenu(allItems) {
+  try {
+    const daily = await api('GET', `/api/restaurant/menu/daily?date=${_dailyDate}`);
+    const available = new Set(daily.availableItems || []);
+
+    if (!allItems.length) { el('daily-menu-list').innerHTML = '<p class="empty">Ajoutez d\'abord des articles.</p>'; return; }
+
+    el('daily-menu-list').innerHTML = allItems.map(i => `
+      <div class="daily-row">
+        <label class="toggle-label">
+          <span class="item-name">${esc(i.name)}</span>
+          <span class="item-cat">${i.category === 'food' ? '🍽️' : '🥤'}</span>
+        </label>
+        <label class="toggle-switch">
+          <input type="checkbox" ${available.has(i.id) ? 'checked' : ''}
+            onchange="toggleDailyItem('${i.id}', this.checked)"/>
+          <span class="slider"></span>
+        </label>
+      </div>`).join('');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function toggleDailyItem(itemId, checked) {
+  try {
+    const daily = await api('GET', `/api/restaurant/menu/daily?date=${_dailyDate}`);
+    let available = daily.availableItems || [];
+    if (checked) { if (!available.includes(itemId)) available.push(itemId); }
+    else          { available = available.filter(id => id !== itemId); }
+    await api('PUT', '/api/restaurant/menu/daily', { date: _dailyDate, availableItems: available });
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// Item modal
+function openItemModal(itemIdOrNull, presetCategory) {
+  const item = itemIdOrNull ? _menuItemCache[itemIdOrNull] : null;
+  el('modal-item-title').textContent = item ? 'Modifier l\'article' : 'Nouvel article';
+  el('mi-id').value    = item?.id || '';
+  el('mi-name').value  = item?.name || '';
+  el('mi-cat').value   = item?.category || presetCategory || '';
+  el('mi-price').value = item?.price ?? '';
+  el('mi-desc').value  = item?.description || '';
+  openModal('modal-item');
+}
+
+async function saveItem() {
+  const id    = el('mi-id').value;
+  const name  = el('mi-name').value.trim();
+  const cat   = el('mi-cat').value;
+  const price = el('mi-price').value;
+  const desc  = el('mi-desc').value.trim();
+  if (!name || !cat || price === '') { toast('Nom, catégorie et prix requis', 'error'); return; }
+  try {
+    if (id) await api('PUT', `/api/restaurant/menu/items/${id}`, { name, category: cat, price: Number(price), description: desc });
+    else    await api('POST', '/api/restaurant/menu/items', { name, category: cat, price: Number(price), description: desc });
+    closeModal('modal-item');
+    toast('Article enregistré', 'success');
+    loadMenus();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteItem(id) {
+  confirm2('Supprimer cet article ?', async () => {
+    try {
+      await api('DELETE', `/api/restaurant/menu/items/${id}`);
+      toast('Article supprimé', 'success');
+      loadMenus();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RESTAURANT — Clientèle
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadClientele() {
+  try {
+    const [clients, orders, subs, enterprises] = await Promise.all([
+      api('GET', '/api/restaurant/clientele'),
+      api('GET', '/api/orders'),
+      api('GET', '/api/subscriptions'),
+      api('GET', '/api/restaurant/enterprises'),
+    ]);
+
+    // Clientèle affiliée
+    el('clientele-list').innerHTML = clients.length
+      ? clients.map(c => `
+          <div class="client-card">
+            <div>
+              <strong>${esc(c.companyName)}</strong>
+              ${c.location ? `<a href="${esc(c.location)}" target="_blank" class="map-link">📍 Maps</a>` : ''}
+            </div>
+            <span class="badge">${c.todayChoices?.length || 0} choix aujourd'hui</span>
+          </div>`).join('')
+      : '<p class="empty">Aucune entreprise affiliée.</p>';
+
+    // Commandes
+    el('rst-orders-list').innerHTML = orders.length
+      ? orders.map(o => `
+          <div class="order-card">
+            <div>
+              <strong>${esc(o.enterpriseName)}</strong> — ${fmtDateTime(o.createdAt)}
+              <span class="badge ${o.status}">${o.status}</span>
+            </div>
+            <div>${fmtPrice(o.totalAmount)} · ${o.paymentMode === 'upfront' ? '💳 Mobile' : '🚚 Livraison'}</div>
+            <div class="order-btns">
+              ${['confirmed','preparing','delivered'].map(s =>
+                `<button class="btn ghost sm" onclick="updateOrderStatus('${o.id}','${s}')">${s}</button>`
+              ).join('')}
+            </div>
+          </div>`).join('')
+      : '<p class="empty">Aucune commande.</p>';
+
+    // Abonnements
+    el('rst-subs-list').innerHTML = subs.length
+      ? subs.map(s => `
+          <div class="sub-card">
+            <span>${esc(s.enterpriseName)} — <em>${s.frequency}</em> — <span class="badge ${s.status}">${s.status}</span></span>
+            ${s.status === 'pending' ? `
+              <div>
+                <button class="btn primary sm" onclick="respondSub('${s.id}','accepted')">✓ Accepter</button>
+                <button class="btn danger sm"  onclick="respondSub('${s.id}','declined')">✕ Refuser</button>
+              </div>` : ''}
+          </div>`).join('')
+      : '<p class="empty">Aucune demande.</p>';
+
+    // Offrir services
+    el('rst-enterprises-list').innerHTML = enterprises.map(e => `
+      <div class="ent-row">
+        <span>${esc(e.companyName)}</span>
+        ${e.isAffiliated ? '<span class="badge success">Affiliée</span>' : ''}
+        ${!e.hasOffer && !e.isAffiliated
+          ? `<button class="btn primary sm" onclick="offerService('${e.id}')">📤 Proposer</button>`
+          : e.hasOffer && !e.isAffiliated
+          ? `<button class="btn ghost sm" onclick="withdrawOffer('${e.id}')">Retirer l'offre</button>`
+          : ''}
+      </div>`).join('') || '<p class="empty">Aucune entreprise.</p>';
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function updateOrderStatus(orderId, status) {
+  try {
+    await api('PUT', `/api/orders/${orderId}/status`, { status });
+    toast('Statut mis à jour', 'success');
+    loadClientele();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function respondSub(id, status) {
+  try {
+    await api('PUT', `/api/subscriptions/${id}`, { status });
+    toast(status === 'accepted' ? 'Abonnement accepté' : 'Abonnement refusé', 'success');
+    loadClientele();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function offerService(enterpriseId) {
+  try {
+    await api('POST', `/api/restaurant/enterprises/${enterpriseId}/offer`);
+    toast('Offre envoyée', 'success');
+    loadClientele();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function withdrawOffer(enterpriseId) {
+  try {
+    await api('DELETE', `/api/restaurant/enterprises/${enterpriseId}/offer`);
+    toast('Offre retirée', 'success');
+    loadClientele();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RESTAURANT — Profil
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function openProfileModal() {
+  try {
+    const r = await api('GET', '/api/restaurant/me');
+    el('prof-rname').value = r.restaurantName || '';
+    el('prof-fname').value = r.fullName || '';
+    el('prof-phone').value = r.phone || '';
+    el('prof-addr').value  = r.address || '';
+    el('prof-spec').value  = r.specialty || '';
+    el('prof-desc').value  = r.description || '';
+    el('prof-oldpwd').value = '';
+    el('prof-newpwd').value = '';
+    _profilePhotoData = r.photo || null;
+
+    const img = el('prof-img');
+    if (r.photo) { img.src = r.photo; img.classList.remove('hidden'); el('prof-clear-btn').classList.remove('hidden'); }
+    else         { img.classList.add('hidden'); el('prof-clear-btn').classList.add('hidden'); }
+
+    // Payment info
+    const container = el('prof-pay-entries');
+    container.innerHTML = '';
+    (r.paymentInfo || []).forEach(p => {
+      addPayEntry('prof-pay-entries');
+      const entries = container.querySelectorAll('.pay-entry');
+      const last = entries[entries.length - 1];
+      last.querySelector('.pay-type').value = p.type;
+      last.querySelector('.pay-num').value  = p.number;
+    });
+
+    openModal('modal-profile');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function onPhotoFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    _profilePhotoData = e.target.result;
+    el('prof-img').src = _profilePhotoData;
+    el('prof-img').classList.remove('hidden');
+    el('prof-clear-btn').classList.remove('hidden');
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearProfilePhoto() {
+  _profilePhotoData = '';
+  el('prof-img').classList.add('hidden');
+  el('prof-clear-btn').classList.add('hidden');
+}
+
+async function saveProfile() {
+  const body = {
+    restaurantName: el('prof-rname').value.trim(),
+    fullName:       el('prof-fname').value.trim(),
+    phone:          el('prof-phone').value.trim(),
+    address:        el('prof-addr').value.trim(),
+    specialty:      el('prof-spec').value.trim(),
+    description:    el('prof-desc').value.trim(),
+    paymentInfo:    collectPayEntries('prof-pay-entries'),
+    photo:          _profilePhotoData || '',
+  };
+  const oldpwd = el('prof-oldpwd').value;
+  const newpwd = el('prof-newpwd').value;
+  if (newpwd) { body.password = oldpwd; body.newPassword = newpwd; }
+  try {
+    await api('PATCH', '/api/restaurant/profile', body);
+    closeModal('modal-profile');
+    toast('Profil enregistré', 'success');
+    loadRestoHome();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ENTERPRISE — Aujourd'hui
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadEntToday() {
+  try {
+    const [choices, affiliated] = await Promise.all([
+      api('GET', '/api/choices/today'),
+      api('GET', '/api/enterprise/restaurants'),
+    ]);
+
+    if (!affiliated.length) {
+      el('ent-today-content').innerHTML = '<p class="empty">Aucun restaurant affilié. Affiliez-vous dans l\'onglet Restaurants.</p>';
+      return;
+    }
+
+    // Group choices by restaurant
+    const byResto = {};
+    choices.forEach(c => {
+      if (!byResto[c.restaurantId]) byResto[c.restaurantId] = { name: c.restaurantName, choices: [] };
+      byResto[c.restaurantId].choices.push(c);
+    });
+
+    const employees = await api('GET', '/api/enterprise/employees');
+    const hasChoice = new Set(choices.map(c => c.userId));
+    const without   = employees.filter(e => !hasChoice.has(e.id));
+
+    let html = `<h3>📅 ${fmtDate(todayStr())}</h3>`;
+
+    if (!choices.length) {
+      html += '<p class="empty">Aucun choix enregistré pour aujourd\'hui.</p>';
+    } else {
+      Object.values(byResto).forEach(g => {
+        const total = g.choices.reduce((s,c) => s + (c.foodItem?.price||0) + (c.drinkItem?.price||0), 0);
+        html += `<div class="resto-group">
+          <div class="group-header">
+            <h4>🍴 ${esc(g.name)}</h4>
+            <span>Total: ${fmtPrice(total)}</span>
+            <button class="btn primary sm" onclick="openOrderModal('${g.choices[0].restaurantId}')">📦 Commander</button>
+          </div>
+          <table class="choice-table">
+            <thead><tr><th>Employé</th><th>Plat</th><th>Boisson</th><th>Montant</th></tr></thead>
+            <tbody>${g.choices.map(c => `<tr>
+              <td>${esc(c.userName)}</td>
+              <td>${c.foodItem ? esc(c.foodItem.name) : '—'}</td>
+              <td>${c.drinkItem ? esc(c.drinkItem.name) : '—'}</td>
+              <td>${fmtPrice((c.foodItem?.price||0)+(c.drinkItem?.price||0))}</td>
+            </tr>`).join('')}</tbody>
+          </table>
+        </div>`;
+      });
+    }
+
+    if (without.length) {
+      html += `<div class="warn-box">⚠️ Sans choix: ${without.map(e => esc(e.fullName)).join(', ')}</div>`;
+    }
+
+    el('ent-today-content').innerHTML = html;
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function downloadOrdersPDF() {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const res = await fetch('/api/stats/pdf/orders', {
+      headers: { 'Authorization': 'Bearer ' + _token }
+    });
+    if (!res.ok) { toast('Erreur lors de la génération du PDF', 'error'); return; }
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `commandes-${today}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function openOrderModal(restaurantId) {
+  _orderRestaurantId = restaurantId;
+  el('modal-order-body').innerHTML = `
+    <p>Mode de paiement :</p>
+    <label class="radio-row"><input type="radio" name="paymode" value="delivery" checked> 🚚 Livraison (paiement à la livraison)</label>
+    <label class="radio-row"><input type="radio" name="paymode" value="upfront"> 💳 Mobile Money (paiement à l'avance)</label>
+    <div id="upfront-section" class="hidden" style="margin-top:12px">
+      <div class="field-label">Type de paiement</div>
+      <input id="dep-type" type="text" placeholder="Ex: OM, Wave…"/>
+      <div class="field-label">Capture du dépôt (base64 ou URL)</div>
+      <input id="dep-screenshot" type="text" placeholder="Optionnel"/>
+    </div>`;
+  document.querySelectorAll('input[name="paymode"]').forEach(r => {
+    r.addEventListener('change', () => {
+      el('upfront-section').classList.toggle('hidden', r.value !== 'upfront');
+    });
+  });
+  openModal('modal-order');
+}
+
+async function submitOrder() {
+  const paymentMode = document.querySelector('input[name="paymode"]:checked')?.value;
+  const body = { restaurantId: _orderRestaurantId, paymentMode };
+  if (paymentMode === 'upfront') {
+    body.depositType       = el('dep-type')?.value.trim();
+    body.depositScreenshot = el('dep-screenshot')?.value.trim();
+  }
+  try {
+    await api('POST', '/api/orders', body);
+    closeModal('modal-order');
+    toast('Commande envoyée !', 'success');
+    loadEntToday();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ENTERPRISE — Restaurants
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _restoTabMode = 'all';
+
+async function loadEntRestaurants() {
+  switchRestoTab(_restoTabMode);
+}
+
+async function switchRestoTab(mode) {
+  _restoTabMode = mode;
+  el('seg-all').classList.toggle('active', mode === 'all');
+  el('seg-aff').classList.toggle('active', mode === 'affiliated');
+  try {
+    const [all, affiliated] = await Promise.all([
+      api('GET', '/api/restaurants'),
+      api('GET', '/api/enterprise/restaurants'),
+    ]);
+    const affIds = new Set(affiliated.map(r => r.id));
+    const list   = mode === 'all' ? all : affiliated;
+
+    el('ent-restaurants-list').innerHTML = list.length
+      ? list.map(r => `
+          <div class="resto-card">
+            ${r.photo ? `<img src="${esc(r.photo)}" class="resto-thumb"/>` : '<div class="resto-thumb-ph">🍴</div>'}
+            <div class="resto-info">
+              <h4>${esc(r.restaurantName)}</h4>
+              ${r.specialty ? `<p>${esc(r.specialty)}</p>` : ''}
+              ${r.address   ? `<p>📍 ${esc(r.address)}</p>` : ''}
+              ${r.phone     ? `<p>📞 ${esc(r.phone)}</p>` : ''}
+              ${affIds.has(r.id) && r.dailyMenu
+                ? `<p class="daily-preview">Menu du jour : ${[...r.dailyMenu.foods, ...r.dailyMenu.drinks].map(i => esc(i.name)).join(', ') || 'Non défini'}</p>`
+                : ''}
+            </div>
+            <div class="resto-actions">
+              ${affIds.has(r.id)
+                ? `<span class="badge success">Affilié</span>
+                   <button class="btn ghost sm" onclick="disaffiliate('${r.id}')">Se désaffilier</button>
+                   <button class="btn primary sm" onclick="openSubModal('${r.id}','${esc(r.restaurantName)}')">📅 Abonnement</button>`
+                : `<button class="btn primary sm" onclick="affiliate('${r.id}')">+ S'affilier</button>`}
+            </div>
+          </div>`).join('')
+      : '<p class="empty">Aucun restaurant.</p>';
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function affiliate(restaurantId) {
+  try {
+    await api('POST', `/api/enterprise/restaurants/${restaurantId}/affiliate`);
+    toast('Affilié !', 'success');
+    loadEntRestaurants();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function disaffiliate(restaurantId) {
+  confirm2('Se désaffilier de ce restaurant ?', async () => {
+    try {
+      await api('DELETE', `/api/enterprise/restaurants/${restaurantId}/affiliate`);
+      toast('Désaffilié', 'success');
+      loadEntRestaurants();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+function openSubModal(restaurantId, name) {
+  _subRestaurantId = restaurantId;
+  el('sub-rname').textContent = name;
+  el('sub-rid').value = restaurantId;
+  openModal('modal-sub');
+}
+
+async function submitSub() {
+  const freq = el('sub-freq').value;
+  try {
+    await api('POST', '/api/subscriptions', { restaurantId: _subRestaurantId, frequency: freq });
+    closeModal('modal-sub');
+    toast('Demande d\'abonnement envoyée', 'success');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ENTERPRISE — Menus des restaurants affiliés
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadEntMenus() {
+  try {
+    const restaurants = await api('GET', '/api/enterprise/restaurants');
+    if (!restaurants.length) {
+      el('ent-menus-content').innerHTML = '<p class="empty">Aucun restaurant affilié. Affiliez-vous dans l\'onglet Restaurants.</p>';
+      return;
+    }
+    el('ent-menus-content').innerHTML = restaurants.map(r => {
+      const foods  = (r.menu || []).filter(i => i.category === 'food');
+      const drinks = (r.menu || []).filter(i => i.category === 'drink');
+      const dayFoods  = r.dailyMenu?.foods  || [];
+      const dayDrinks = r.dailyMenu?.drinks || [];
+      return `<div class="menu-resto-card">
+        <div class="pane-header" style="margin-bottom:8px">
+          <h4>🍴 ${esc(r.restaurantName)}</h4>
+          ${r.specialty ? `<span class="badge">${esc(r.specialty)}</span>` : ''}
+        </div>
+        <p class="hint" style="margin-bottom:8px">Menu du jour : ${dayFoods.length + dayDrinks.length ? [...dayFoods,...dayDrinks].map(i=>esc(i.name)).join(', ') : 'Non défini'}</p>
+        ${foods.length ? `<div class="menu-section"><h5>🍽️ Plats complets (${foods.length})</h5>
+          <table class="choice-table" style="min-width:0">
+            <thead><tr><th>Nom</th><th>Prix</th><th>Dispo aujourd'hui</th></tr></thead>
+            <tbody>${foods.map(f => {
+              const inDay = (r.dailyMenu?.foods||[]).some(d=>d.id===f.id);
+              return `<tr><td>${esc(f.name)}</td><td>${fmtPrice(f.price)}</td>
+                <td>${inDay ? '<span class="badge success">✓ Oui</span>' : '<span class="badge">Non</span>'}</td></tr>`;
+            }).join('')}</tbody>
+          </table></div>` : ''}
+        ${drinks.length ? `<div class="menu-section" style="margin-top:10px"><h5>🥤 Boissons (${drinks.length})</h5>
+          <table class="choice-table" style="min-width:0">
+            <thead><tr><th>Nom</th><th>Prix</th><th>Dispo aujourd'hui</th></tr></thead>
+            <tbody>${drinks.map(d => {
+              const inDay = (r.dailyMenu?.drinks||[]).some(x=>x.id===d.id);
+              return `<tr><td>${esc(d.name)}</td><td>${fmtPrice(d.price)}</td>
+                <td>${inDay ? '<span class="badge success">✓ Oui</span>' : '<span class="badge">Non</span>'}</td></tr>`;
+            }).join('')}</tbody>
+          </table></div>` : ''}
+        ${!foods.length && !drinks.length ? '<p class="empty">Ce restaurant n\'a pas encore publié de menu.</p>' : ''}
+      </div>`;
+    }).join('');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ENTERPRISE — Employés, Commandes, Stats
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadEntEmployees() {
+  try {
+    const employees = await api('GET', '/api/enterprise/employees');
+    el('ent-emp-list').innerHTML = employees.length
+      ? employees.map(e => {
+          _empCache[e.id] = e;
+          return `<div class="emp-row">
+            <span>${e.gender === 'female' ? '👩' : '👨'} ${esc(e.fullName)}</span>
+            <div>
+              <button class="btn ghost sm" onclick="openEmpModal('${e.id}')">✏️</button>
+              <button class="btn danger sm" onclick="deleteEmployee('${e.id}')">🗑️</button>
+            </div>
+          </div>`;
+        }).join('')
+      : '<p class="empty">Aucun employé. Ajoutez-en avec le bouton +</p>';
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function openEmpModal(empIdOrNull) {
+  const emp = empIdOrNull ? _empCache[empIdOrNull] : null;
+  el('modal-emp-title').textContent = emp ? 'Modifier l\'employé' : 'Nouvel employé';
+  el('emp-id').value     = emp?.id || '';
+  el('emp-name').value   = emp?.fullName || '';
+  el('emp-gender').value = emp?.gender || '';
+  el('emp-pwd').value    = '';
+  el('emp-pwd-lbl').textContent = emp ? 'Nouveau mot de passe (laisser vide = inchangé)' : 'Mot de passe *';
+  openModal('modal-emp');
+}
+
+async function saveEmployee() {
+  const id     = el('emp-id').value;
+  const name   = el('emp-name').value.trim();
+  const gender = el('emp-gender').value;
+  const pwd    = el('emp-pwd').value;
+  if (!name || !gender) { toast('Nom et genre requis', 'error'); return; }
+  if (!id && !pwd) { toast('Mot de passe requis pour un nouvel employé', 'error'); return; }
+  const body = { fullName: name, gender };
+  if (pwd) body.password = pwd;
+  try {
+    if (id) await api('PUT', `/api/enterprise/employees/${id}`, body);
+    else    await api('POST', '/api/enterprise/employees', body);
+    closeModal('modal-emp');
+    toast('Employé enregistré', 'success');
+    loadEntEmployees();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteEmployee(id) {
+  confirm2('Supprimer cet employé ?', async () => {
+    try {
+      await api('DELETE', `/api/enterprise/employees/${id}`);
+      toast('Employé supprimé', 'success');
+      loadEntEmployees();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+async function loadEntOrders() {
+  try {
+    const orders = await api('GET', '/api/orders');
+    el('ent-orders-list').innerHTML = orders.length
+      ? orders.map(o => `
+          <div class="order-card">
+            <div><strong>${esc(o.restaurantName)}</strong> — ${fmtDateTime(o.createdAt)}
+              <span class="badge ${o.status}">${o.status}</span>
+            </div>
+            <div>${fmtPrice(o.totalAmount)} · ${o.items?.length || 0} repas</div>
+          </div>`).join('')
+      : '<p class="empty">Aucune commande.</p>';
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function loadEntStats() {
+  const freq = el('ent-freq')?.value || 'monthly';
+  try {
+    const s = await api('GET', `/api/stats/enterprise?frequency=${freq}`);
+    const topFoods  = Object.entries(s.foodCounts  || {}).sort((a,b)=>b[1]-a[1]).slice(0,5);
+    const topDrinks = Object.entries(s.drinkCounts || {}).sort((a,b)=>b[1]-a[1]).slice(0,5);
+    el('ent-stats-content').innerHTML = `
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-num">${s.totalChoices}</div><div class="stat-lbl">Choix</div></div>
+        <div class="stat-card"><div class="stat-num">${fmtPrice(s.totalBudget)}</div><div class="stat-lbl">Budget dépensé</div></div>
+      </div>
+      ${topFoods.length ? `<h4>Plats populaires</h4><ul class="item-list">${topFoods.map(([n,c])=>`<li>${esc(n)} <span class="badge">${c}</span></li>`).join('')}</ul>` : ''}
+      ${topDrinks.length ? `<h4>Boissons populaires</h4><ul class="item-list">${topDrinks.map(([n,c])=>`<li>${esc(n)} <span class="badge">${c}</span></li>`).join('')}</ul>` : ''}
+      ${s.employeeStats?.length ? `<h4>Consommation par employé</h4><table class="choice-table">
+        <thead><tr><th>Nom</th><th>Choix</th></tr></thead>
+        <tbody>${s.employeeStats.map(e=>`<tr><td>${esc(e.fullName)}</td><td>${e.choicesCount}</td></tr>`).join('')}</tbody>
+      </table>` : ''}`;
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function pdfEntStats() {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.text('Statistiques Entreprise — LunchApp', 14, 16);
+  doc.text(el('ent-stats-content').innerText, 14, 30);
+  doc.save('stats-entreprise.pdf');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EMPLOYEE — Menu du jour
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadEmpMenu() {
+  try {
+    const [menus, myChoice] = await Promise.all([
+      api('GET', '/api/employee/menus'),
+      api('GET', '/api/choices/mine'),
+    ]);
+
+    _myChoiceCache = myChoice || null;
+
+    if (!menus.length) {
+      el('emp-menu-content').innerHTML = '<p class="empty">Aucun menu disponible aujourd\'hui.</p>';
+      return;
+    }
+
+    // Pre-populate pending selection from existing choice (enables editing)
+    if (myChoice) {
+      _pendingRestaurantId = myChoice.restaurantId;
+      _pendingFoodId    = myChoice.foodItem?.id    || null;
+      _pendingFoodName  = myChoice.foodItem?.name  || '';
+      _pendingFoodPrice = myChoice.foodItem?.price || 0;
+      _pendingDrinkId    = myChoice.drinkItem?.id    || null;
+      _pendingDrinkName  = myChoice.drinkItem?.name  || '';
+      _pendingDrinkPrice = myChoice.drinkItem?.price || 0;
+    } else {
+      _pendingRestaurantId = null;
+      _pendingFoodId = _pendingDrinkId = null;
+      _pendingFoodName = _pendingDrinkName = '';
+      _pendingFoodPrice = _pendingDrinkPrice = 0;
+    }
+
+    // Build item lookup cache
+    menus.forEach(m => {
+      [...m.foods, ...m.drinks].forEach(i => { _empItemLookup[i.id] = i; });
+    });
+
+    const elapsed = myChoice ? (Date.now() - new Date(myChoice.createdAt).getTime()) / 60000 : Infinity;
+    const locked  = myChoice && elapsed >= 5;
+
+    const menuHtml = locked ? '' : menus.map(m => `
+      <div class="menu-resto-card">
+        <h4>🍴 ${esc(m.restaurant.restaurantName)}</h4>
+        ${m.foods.length ? `<div class="menu-section"><h5>🍽️ Plats</h5>
+          ${m.foods.map(f => `<div class="menu-item${_pendingFoodId === f.id ? ' selected' : ''}" data-cat="food"
+            onclick="selectItem(this,'food','${f.id}','${m.restaurant.id}')">
+            <span>${esc(f.name)}</span><span class="item-price">${fmtPrice(f.price)}</span>
+          </div>`).join('')}</div>` : ''}
+        ${m.drinks.length ? `<div class="menu-section"><h5>🥤 Boissons</h5>
+          ${m.drinks.map(d => `<div class="menu-item${_pendingDrinkId === d.id ? ' selected' : ''}" data-cat="drink"
+            onclick="selectItem(this,'drink','${d.id}','${m.restaurant.id}')">
+            <span>${esc(d.name)}</span><span class="item-price">${fmtPrice(d.price)}</span>
+          </div>`).join('')}</div>` : ''}
+      </div>`).join('');
+
+    el('emp-menu-content').innerHTML = `<div id="emp-choice-summary"></div>` + menuHtml;
+    renderChoiceSummary();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// Choice state
+let _pendingRestaurantId = null, _pendingFoodId = null, _pendingDrinkId = null;
+let _pendingFoodName = '', _pendingDrinkName = '', _pendingFoodPrice = 0, _pendingDrinkPrice = 0;
+let _myChoiceCache = null;
+const _empItemLookup = {}; // itemId → { name, price, category }
+
+function selectItem(elem, cat, itemId, restaurantId) {
+  if (cat === 'food') {
+    _pendingFoodId = itemId;
+    const info = _empItemLookup[itemId];
+    _pendingFoodName  = info?.name  || '';
+    _pendingFoodPrice = info?.price || 0;
   } else {
-    customWrap.classList.add('hidden');
-    document.getElementById('admin-choice-custom-input').value = '';
+    _pendingDrinkId = itemId;
+    const info = _empItemLookup[itemId];
+    _pendingDrinkName  = info?.name  || '';
+    _pendingDrinkPrice = info?.price || 0;
   }
-  document.getElementById('admin-choice-error').classList.add('hidden');
-  document.getElementById('admin-choice-modal').classList.remove('hidden');
+  _pendingRestaurantId = restaurantId;
+  // Highlight selected within same category
+  document.querySelectorAll('.menu-item').forEach(i => {
+    if (i.dataset.cat === cat) i.classList.remove('selected');
+  });
+  elem.classList.add('selected');
+  renderChoiceSummary();
 }
 
-function selectAdminChoiceFood(foodId, el) {
-  adminChoiceCtx.selectedFood = foodId;
-  document.querySelectorAll('#admin-choice-food-grid .food-opt').forEach(o => o.classList.remove('sel'));
-  el.classList.add('sel');
-  const customWrap = document.getElementById('admin-choice-custom');
-  if (foodId === 'Autres') {
-    customWrap.classList.remove('hidden');
+function renderChoiceSummary() {
+  const box = el('emp-choice-summary');
+  if (!box) return;
+
+  const mc = _myChoiceCache;
+  const elapsed = mc ? (Date.now() - new Date(mc.createdAt).getTime()) / 60000 : Infinity;
+  const canEdit = mc && elapsed < 5;
+  const locked  = mc && elapsed >= 5;
+
+  if (locked) {
+    box.innerHTML = `<div class="my-choice-card">
+      <h3>Mon choix du jour</h3>
+      ${mc.foodItem  ? `<p>🍽️ <strong>${esc(mc.foodItem.name)}</strong> — ${fmtPrice(mc.foodItem.price)}</p>` : ''}
+      ${mc.drinkItem ? `<p>🥤 <strong>${esc(mc.drinkItem.name)}</strong> — ${fmtPrice(mc.drinkItem.price)}</p>` : ''}
+      <div class="warn-box locked">🔒 Choix verrouillé — modification impossible</div>
+      ${!mc.rating ? `<button class="btn ghost sm" onclick="openRateModal('${mc.id}')">⭐ Évaluer</button>` : `<p>${stars(mc.rating)} (${mc.rating}/5)</p>`}
+    </div>`;
+    return;
+  }
+
+  if (!_pendingFoodId && !_pendingDrinkId && !canEdit) {
+    box.innerHTML = `<div class="hint" style="padding:10px 0">👆 Cliquez sur un plat et/ou une boisson pour faire votre choix.</div>`;
+    return;
+  }
+
+  const total = _pendingFoodPrice + _pendingDrinkPrice;
+  box.innerHTML = `<div class="my-choice-card">
+    <h3>${canEdit ? '✏️ Modifier mon choix' : '📝 Ma sélection'}</h3>
+    <div style="margin:8px 0;display:flex;flex-direction:column;gap:4px">
+      ${_pendingFoodId  ? `<p>🍽️ <strong>${esc(_pendingFoodName)}</strong> — ${fmtPrice(_pendingFoodPrice)}</p>` : '<p class="hint">Aucun plat sélectionné</p>'}
+      ${_pendingDrinkId ? `<p>🥤 <strong>${esc(_pendingDrinkName)}</strong> — ${fmtPrice(_pendingDrinkPrice)}</p>` : '<p class="hint">Aucune boisson sélectionnée</p>'}
+      ${total ? `<p style="font-weight:700;color:var(--orange)">Total : ${fmtPrice(total)}</p>` : ''}
+    </div>
+    ${canEdit ? `<div class="warn-box">⏱️ Modification possible pendant encore ${(5 - elapsed).toFixed(1)} min</div>` : ''}
+    <div class="dialog-btns" style="margin-top:10px">
+      ${canEdit && mc ? `<button class="btn danger sm" onclick="deleteMyChoice('${mc.id}')">🗑️ Supprimer</button>` : ''}
+      <button class="btn primary" onclick="confirmChoice()">✅ Confirmer</button>
+    </div>
+  </div>`;
+}
+
+async function confirmChoice() {
+  if (!_pendingFoodId && !_pendingDrinkId) { toast('Sélectionnez au moins un plat ou une boisson', 'error'); return; }
+  const mc = _myChoiceCache;
+  const elapsed = mc ? (Date.now() - new Date(mc.createdAt).getTime()) / 60000 : Infinity;
+  try {
+    if (mc && elapsed < 5) {
+      await api('PUT', `/api/choices/${mc.id}`, {
+        foodItemId:  _pendingFoodId  || null,
+        drinkItemId: _pendingDrinkId || null,
+      });
+      toast('Choix modifié !', 'success');
+    } else {
+      await api('POST', '/api/choices', {
+        restaurantId: _pendingRestaurantId,
+        foodItemId:  _pendingFoodId  || undefined,
+        drinkItemId: _pendingDrinkId || undefined,
+      });
+      toast('Choix enregistré !', 'success');
+    }
+    loadEmpMenu();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteMyChoice(choiceId) {
+  confirm2('Supprimer votre choix ?', async () => {
+    try {
+      await api('DELETE', `/api/choices/${choiceId}`);
+      toast('Choix supprimé', 'success');
+      loadEmpMenu();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+// Rating
+function openRateModal(choiceId) {
+  _ratingChoiceId = choiceId;
+  _ratingStars = 0;
+  const row = el('stars-row');
+  row.innerHTML = [1,2,3,4,5].map(n =>
+    `<span class="star" data-n="${n}" onclick="selectStar(${n})">☆</span>`
+  ).join('');
+  el('rate-hint').textContent = 'Sélectionnez une note';
+  openModal('modal-rate');
+}
+
+function selectStar(n) {
+  _ratingStars = n;
+  el('rate-hint').textContent = `${n} étoile${n > 1 ? 's' : ''}`;
+  document.querySelectorAll('.star').forEach(s => {
+    s.textContent = Number(s.dataset.n) <= n ? '⭐' : '☆';
+  });
+}
+
+async function submitRating() {
+  if (!_ratingStars) { toast('Sélectionnez une note', 'error'); return; }
+  try {
+    await api('POST', `/api/choices/${_ratingChoiceId}/rate`, { stars: _ratingStars });
+    closeModal('modal-rate');
+    toast('Évaluation envoyée', 'success');
+    loadEmpMenu();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EMPLOYEE — Historique
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadEmpHistory() {
+  try {
+    const choices = await api('GET', '/api/choices/history');
+    el('emp-history-list').innerHTML = choices.length
+      ? choices.map(c => `
+          <div class="history-row">
+            <div>
+              <strong>${fmtDate(c.date)}</strong> — ${esc(c.restaurantName)}
+              ${c.foodItem  ? `<br>🍽️ ${esc(c.foodItem.name)} — ${fmtPrice(c.foodItem.price)}` : ''}
+              ${c.drinkItem ? `<br>🥤 ${esc(c.drinkItem.name)} — ${fmtPrice(c.drinkItem.price)}` : ''}
+            </div>
+            <div>
+              ${c.rating ? stars(c.rating) : `<button class="btn ghost sm" onclick="openRateModal('${c.id}')">⭐ Noter</button>`}
+            </div>
+          </div>`).join('')
+      : '<p class="empty">Aucun historique.</p>';
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function clearHistory() {
+  confirm2('Vider votre historique (sauf aujourd\'hui) ?', async () => {
+    try {
+      await api('DELETE', '/api/choices/history');
+      toast('Historique vidé', 'success');
+      loadEmpHistory();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ADMIN
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadAdminStats() {
+  _adminTab = _adminTab || 'ov';
+  document.querySelectorAll('.atab').forEach((b,i) => {
+    b.classList.toggle('active', ['ov','ent','rst','emp','del'][i] === _adminTab);
+  });
+  const freq = el('adm-freq')?.value || 'monthly';
+  try {
+    switch (_adminTab) {
+      case 'ov': {
+        const s = await api('GET', `/api/admin/stats?frequency=${freq}`);
+        el('admin-content').innerHTML = `
+          <div class="stats-grid">
+            <div class="stat-card"><div class="stat-num">${s.counts.enterprises}</div><div class="stat-lbl">Entreprises</div></div>
+            <div class="stat-card"><div class="stat-num">${s.counts.restaurants}</div><div class="stat-lbl">Restaurants</div></div>
+            <div class="stat-card"><div class="stat-num">${s.counts.employees}</div><div class="stat-lbl">Employés</div></div>
+            <div class="stat-card"><div class="stat-num">${fmtPrice(s.totalMobilized)}</div><div class="stat-lbl">Total mobilisé</div></div>
+          </div>
+          <p>👨 ${s.gender.male} hommes · 👩 ${s.gender.female} femmes</p>
+          ${Object.keys(s.restaurantRevenue||{}).length ? `<h4>Recettes par restaurant</h4><ul class="item-list">${Object.entries(s.restaurantRevenue).map(([n,v])=>`<li>${esc(n)}: ${fmtPrice(v)}</li>`).join('')}</ul>` : ''}
+          ${Object.keys(s.enterpriseBudget||{}).length ? `<h4>Budget par entreprise</h4><ul class="item-list">${Object.entries(s.enterpriseBudget).map(([n,v])=>`<li>${esc(n)}: ${fmtPrice(v)}</li>`).join('')}</ul>` : ''}`;
+        break;
+      }
+      case 'ent': {
+        const data = await api('GET', '/api/admin/enterprises');
+        el('admin-content').innerHTML = data.length ? `
+          <table class="choice-table">
+            <thead><tr>
+              <th>Entreprise</th><th>Email</th><th>Téléphone</th>
+              <th>Localisation</th><th>Inscrit le</th><th></th>
+            </tr></thead>
+            <tbody>${data.map(e => `<tr>
+              <td><strong>${esc(e.companyName)}</strong></td>
+              <td>${esc(e.email)}</td>
+              <td>${esc(e.phone || '—')}</td>
+              <td>${e.location
+                ? `<a href="${esc(e.location)}" target="_blank" class="map-link">📍 Maps</a>`
+                : '—'}</td>
+              <td>${fmtDateTime(e.createdAt)}</td>
+              <td><button class="btn danger sm" onclick="adminDelete('enterprise','${e.id}')">🗑️</button></td>
+            </tr>`).join('')}</tbody>
+          </table>` : '<p class="empty">Aucune entreprise.</p>';
+        break;
+      }
+      case 'rst': {
+        const data = await api('GET', '/api/admin/restaurants');
+        el('admin-content').innerHTML = data.length ? `
+          <table class="choice-table">
+            <thead><tr>
+              <th>Restaurant</th><th>Gérant</th><th>Email</th>
+              <th>Téléphone</th><th>Spécialité</th><th>Adresse</th>
+              <th>Paiements</th><th>Inscrit le</th><th></th>
+            </tr></thead>
+            <tbody>${data.map(r => `<tr>
+              <td><strong>${esc(r.restaurantName)}</strong></td>
+              <td>${esc(r.fullName)}</td>
+              <td>${esc(r.email)}</td>
+              <td>${esc(r.phone || '—')}</td>
+              <td>${esc(r.specialty || '—')}</td>
+              <td>${esc(r.address || '—')}</td>
+              <td>${r.paymentInfo?.length
+                ? r.paymentInfo.map(p => `<span class="badge">${esc(p.type)}: ${esc(p.number)}</span>`).join(' ')
+                : '—'}</td>
+              <td>${fmtDateTime(r.createdAt)}</td>
+              <td><button class="btn danger sm" onclick="adminDelete('restaurant','${r.id}')">🗑️</button></td>
+            </tr>`).join('')}</tbody>
+          </table>` : '<p class="empty">Aucun restaurant.</p>';
+        break;
+      }
+      case 'emp': {
+        const data = await api('GET', '/api/admin/employees');
+        el('admin-content').innerHTML = data.length ? `
+          <table class="choice-table">
+            <thead><tr>
+              <th>Employé</th><th>Genre</th><th>Entreprise</th>
+              <th>Inscrit le</th><th></th>
+            </tr></thead>
+            <tbody>${data.map(e => `<tr>
+              <td><strong>${esc(e.fullName)}</strong></td>
+              <td>${e.gender === 'female' ? '👩 Femme' : '👨 Homme'}</td>
+              <td>${esc(e.enterpriseName)}</td>
+              <td>${fmtDateTime(e.createdAt)}</td>
+              <td><button class="btn danger sm" onclick="adminDelete('employee','${e.id}')">🗑️</button></td>
+            </tr>`).join('')}</tbody>
+          </table>` : '<p class="empty">Aucun employé.</p>';
+        break;
+      }
+      case 'del': {
+        const data = await api('GET', '/api/admin/deletion-requests');
+        el('admin-content').innerHTML = data.length
+          ? `<table class="choice-table"><thead><tr><th>Nom</th><th>Type</th><th>Email</th><th>Date</th><th>Raison</th></tr></thead><tbody>${
+              data.map(d => `<tr>
+                <td>${esc(d.userName)}</td><td>${esc(d.userType)}</td><td>${esc(d.email)}</td>
+                <td>${fmtDateTime(d.deletedAt)}</td><td>${esc(d.reason)}</td>
+              </tr>`).join('')}</tbody></table>`
+          : '<p class="empty">Aucune suppression.</p>';
+        break;
+      }
+    }
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function adminTab(tab, btn) {
+  _adminTab = tab;
+  document.querySelectorAll('.atab').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  loadAdminStats();
+}
+
+async function adminDelete(type, id) {
+  confirm2(`Supprimer ce ${type} définitivement ?`, async () => {
+    try {
+      await api('DELETE', `/api/admin/users/${type}/${id}`);
+      toast('Supprimé', 'success');
+      loadAdminStats();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+function pdfAdminStats() {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.text('Statistiques Admin — LunchApp', 14, 16);
+  doc.text(el('admin-content').innerText.slice(0, 2000), 14, 30);
+  doc.save('stats-admin.pdf');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NOTIFICATIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadNotifs() {
+  try {
+    const notifs = await api('GET', '/api/notifications');
+    const unread = notifs.filter(n => !n.read).length;
+    const badge = el('notif-count');
+    badge.textContent = unread;
+    badge.classList.toggle('hidden', unread === 0);
+
+    el('notif-list').innerHTML = notifs.length
+      ? notifs.map(n => `
+          <div class="notif-row ${n.read ? '' : 'unread'}">
+            <div class="notif-body">
+              <strong>${esc(n.title)}</strong>
+              <p>${esc(n.message)}</p>
+              <small>${fmtDateTime(n.createdAt)}</small>
+            </div>
+            <div class="notif-actions">
+              ${!n.read ? `<button class="btn ghost sm" onclick="readNotif('${n.id}')">✓</button>` : ''}
+              <button class="btn danger sm" onclick="deleteNotif('${n.id}')">🗑️</button>
+            </div>
+          </div>`).join('')
+      : '<p class="empty">Aucune notification.</p>';
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function readNotif(id) {
+  try { await api('PUT', `/api/notifications/${id}/read`); loadNotifs(); } catch {}
+}
+
+async function readAllNotifs() {
+  try { await api('PUT', '/api/notifications/read-all'); loadNotifs(); } catch {}
+}
+
+async function deleteNotif(id) {
+  try { await api('DELETE', `/api/notifications/${id}`); loadNotifs(); } catch {}
+}
+
+async function clearAllNotifs() {
+  confirm2('Effacer toutes les notifications ?', async () => {
+    try { await api('DELETE', '/api/notifications'); loadNotifs(); } catch {}
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MESSAGERIE
+// ═══════════════════════════════════════════════════════════════════════════
+
+// suffix = '' pour restaurant, 'ent' pour entreprise
+async function loadConversations(suffix) {
+  _chatPartnerSuffix = suffix;
+  const listId   = suffix ? 'chat-conversations-ent' : 'chat-conversations';
+  const windowId = suffix ? 'chat-window-ent' : 'chat-window';
+  el(windowId).classList.add('hidden');
+  el(listId).classList.remove('hidden');
+
+  try {
+    const convs = await api('GET', '/api/messages/conversations');
+    el(listId).innerHTML = convs.length
+      ? `<div class="conv-list">${convs.map(c => `
+          <div class="conv-row" onclick="openChat('${c.id}','${esc(c.name)}','${suffix}')">
+            <span class="conv-name">${esc(c.name)}</span>
+            ${c.unread ? `<span class="nbadge">${c.unread}</span>` : ''}
+            <span class="conv-preview">${esc(c.lastMessage || '')}</span>
+          </div>`).join('')}</div>`
+      : '<p class="empty">Aucune conversation. Affiliez-vous à un restaurant pour démarrer une discussion.</p>';
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function openChat(partnerId, partnerName, suffix) {
+  _chatPartnerId     = partnerId;
+  _chatPartnerSuffix = suffix || '';
+  const suf = _chatPartnerSuffix;
+
+  el(suf ? 'chat-conversations-ent' : 'chat-conversations').classList.add('hidden');
+  const win = el(suf ? 'chat-window-ent' : 'chat-window');
+  win.classList.remove('hidden');
+  el(suf ? 'chat-partner-ent' : 'chat-partner').textContent = partnerName;
+
+  await refreshChat(suf);
+  // Mark as read
+  try { await api('POST', '/api/messages/read', { senderId: partnerId }); } catch {}
+}
+
+async function refreshChat(suf) {
+  const msgsEl = el(suf ? 'chat-msgs-ent' : 'chat-msgs');
+  try {
+    const msgs = await api('GET', `/api/messages?withId=${_chatPartnerId}`);
+    msgsEl.innerHTML = msgs.map(m => {
+      const mine = m.senderId === me.id;
+      if (m.type === 'audio') {
+        return `<div class="chat-bubble ${mine ? 'bubble-mine' : 'bubble-theirs'}">
+          <audio controls src="/api/messages/${m.id}/audio-src" data-mid="${m.id}" class="audio-player" onplay="loadAudio(this)"></audio>
+          <small>${fmtDateTime(m.timestamp)}</small>
+        </div>`;
+      }
+      return `<div class="chat-bubble ${mine ? 'bubble-mine' : 'bubble-theirs'}">
+        <p>${esc(m.content)}</p>
+        <small>${fmtDateTime(m.timestamp)}</small>
+      </div>`;
+    }).join('');
+    msgsEl.scrollTop = msgsEl.scrollHeight;
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function loadAudio(audioEl) {
+  // Lazy-load audio via /api/messages/:id/audio
+  if (audioEl.src && audioEl.src.includes('blob:')) return; // Already loaded
+  const mid = audioEl.dataset.mid;
+  try {
+    const { audioData } = await api('GET', `/api/messages/${mid}/audio`);
+    audioEl.src = audioData;
+    audioEl.play();
+  } catch (e) { toast('Impossible de charger l\'audio', 'error'); }
+}
+
+async function sendText(suf) {
+  suf = suf || _chatPartnerSuffix;
+  const inputId = suf ? 'chat-input-ent' : 'chat-input';
+  const content = el(inputId).value.trim();
+  if (!content) return;
+  try {
+    await api('POST', '/api/messages', { recipientId: _chatPartnerId, type: 'text', content });
+    el(inputId).value = '';
+    await refreshChat(suf);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function chatKey(event, suf) {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    sendText(suf || _chatPartnerSuffix);
+  }
+}
+
+function autoH(textarea) {
+  textarea.style.height = 'auto';
+  textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+}
+
+function closeChat(suf) {
+  suf = suf || _chatPartnerSuffix;
+  el(suf ? 'chat-window-ent' : 'chat-window').classList.add('hidden');
+  el(suf ? 'chat-conversations-ent' : 'chat-conversations').classList.remove('hidden');
+  _chatPartnerId = null;
+}
+
+// Audio recording
+async function toggleRec(suf) {
+  suf = suf || _chatPartnerSuffix;
+  if (_mediaRecorder && _mediaRecorder.state === 'recording') { stopRec(suf); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    _audioChunks = [];
+    _mediaRecorder = new MediaRecorder(stream);
+    _mediaRecorder.ondataavailable = e => { if (e.data.size) _audioChunks.push(e.data); };
+    _mediaRecorder.start();
+    _recSeconds = 0;
+    el(suf ? 'rec-ui-ent' : 'rec-ui').classList.remove('hidden');
+    el(suf ? 'rec-btn-ent' : 'rec-btn').textContent = '⏹️';
+    _recTimerInterval = setInterval(() => {
+      _recSeconds++;
+      const m = Math.floor(_recSeconds / 60), s = _recSeconds % 60;
+      el(suf ? 'rec-time-ent' : 'rec-time').textContent = `${m}:${s.toString().padStart(2,'0')}`;
+    }, 1000);
+  } catch { toast('Microphone non accessible', 'error'); }
+}
+
+function stopRec(suf) {
+  if (!_mediaRecorder) return;
+  _mediaRecorder.stop();
+  clearInterval(_recTimerInterval);
+  el(suf ? 'rec-ui-ent' : 'rec-ui').classList.remove('hidden');
+  el(suf ? 'rec-btn-ent' : 'rec-btn').textContent = '🎙️';
+}
+
+function cancelRec(suf) {
+  suf = suf || _chatPartnerSuffix;
+  if (_mediaRecorder) { _mediaRecorder.stop(); _mediaRecorder = null; }
+  clearInterval(_recTimerInterval);
+  _audioChunks = [];
+  el(suf ? 'rec-ui-ent' : 'rec-ui').classList.add('hidden');
+  el(suf ? 'rec-btn-ent' : 'rec-btn').textContent = '🎙️';
+}
+
+async function sendAudio(suf) {
+  suf = suf || _chatPartnerSuffix;
+  if (!_audioChunks.length) { toast('Aucun audio enregistré', 'error'); return; }
+  const blob = new Blob(_audioChunks, { type: 'audio/webm' });
+  const reader = new FileReader();
+  reader.onload = async e => {
+    const audioData = e.target.result;
+    try {
+      await api('POST', '/api/messages', {
+        recipientId: _chatPartnerId,
+        type: 'audio',
+        audioData,
+        audioDuration: _recSeconds,
+      });
+      cancelRec(suf);
+      await refreshChat(suf);
+    } catch (err) { toast(err.message, 'error'); }
+  };
+  reader.readAsDataURL(blob);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SUPPRESSION DE COMPTE
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function doDeleteAccount() {
+  const reason      = el('da-reason').value.trim();
+  const feedback    = el('da-feedback').value.trim();
+  const bad         = el('da-bad').value.trim();
+  const pwd         = el('da-pwd').value;
+  const confirmed   = el('da-check').checked;
+  if (!reason || !pwd) { toast('Raison et mot de passe requis', 'error'); return; }
+  if (!confirmed) { toast('Veuillez cocher la case de confirmation', 'error'); return; }
+  try {
+    await api('DELETE', '/api/account', { reason, feedback, badExperience: bad, password: pwd });
+    closeModal('modal-delete-acct');
+    toast('Compte supprimé', 'info');
+    doLogout();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INITIALISATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+window.addEventListener('DOMContentLoaded', () => {
+  // Radio login — update placeholder
+  document.querySelectorAll('input[name="ltype"]').forEach(r => {
+    r.addEventListener('change', () => {
+      el('l-id').placeholder = r.value === 'employee' ? 'Nom complet' : 'Email';
+      el('login-id-label').textContent = r.value === 'employee' ? 'Nom complet' : 'Email';
+    });
+  });
+
+  // Lien de réinitialisation (?reset=TOKEN)
+  const resetToken = new URLSearchParams(window.location.search).get('reset');
+  if (resetToken) {
+    showAuth('login');
+    el('pane-login').classList.add('hidden');
+    el('pane-forgot').classList.add('hidden');
+    el('reset-token').value = resetToken;
+    el('pane-reset').classList.remove('hidden');
+  } else if (token && me) {
+    startApp();
   } else {
-    customWrap.classList.add('hidden');
-    document.getElementById('admin-choice-custom-input').value = '';
+    showLanding();
   }
-}
 
-function closeAdminChoiceModal() {
-  document.getElementById('admin-choice-modal').classList.add('hidden');
-}
-
-async function submitAdminChoice() {
-  const { id, selectedFood } = adminChoiceCtx;
-  const errEl = document.getElementById('admin-choice-error');
-  if (!selectedFood) { errEl.textContent = 'Veuillez choisir un repas.'; errEl.classList.remove('hidden'); return; }
-
-  const body = { food: selectedFood };
-  if (selectedFood === 'Autres') {
-    body.customFood = document.getElementById('admin-choice-custom-input').value.trim();
-  }
-  try {
-    await api(`/api/admin/choices/${id}`, 'PATCH', body);
-    closeAdminChoiceModal();
-    toast('Commande modifiée !', 'ok');
-    loadAdminDashboard();
-  } catch (err) {
-    errEl.textContent = err.message || 'Erreur lors de la modification.';
-    errEl.classList.remove('hidden');
-  }
-}
-
-async function adminDeleteChoice(choiceId) {
-  const c = adminData.choices.find(ch => ch.id === choiceId);
-  if (!confirm(`Supprimer la commande de "${c?.userName || choiceId}" ?\nCette action est irréversible.`)) return;
-  try {
-    await api(`/api/admin/choices/${choiceId}`, 'DELETE');
-    toast('Commande supprimée.', 'ok');
-    loadAdminDashboard();
-  } catch (err) {
-    toast(err.message || 'Erreur lors de la suppression.', 'err');
-  }
-}
-
-// Toggle visibilité du mot de passe
-function togglePwd(id, btn) {
-  const inp = document.getElementById(id);
-  inp.type  = inp.type === 'password' ? 'text' : 'password';
-  btn.innerHTML = inp.type === 'password'
-    ? '<svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/><path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/></svg>'
-    : '<svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.45l1.514 1.514a4 4 0 00-5.478-5.478z" clip-rule="evenodd"/><path d="M12.454 16.697L9.75 13.992a4 4 0 01-3.742-3.741L2.335 6.578A9.98 9.98 0 00.458 10c1.274 4.057 5.064 7 9.542 7 .847 0 1.669-.105 2.454-.303z"/></svg>';
-}
+  // Init notification badge
+  if (token) updateNotifBadge();
+});

@@ -1,910 +1,1908 @@
-// ═══════════════════════════════════════════════════════════════════
-// server.js — Backend LunchApp
-// Stockage : fichiers JSON en local | Vercel KV en production
-// ═══════════════════════════════════════════════════════════════════
+'use strict';
+// ═══════════════════════════════════════════════════════════════════════════════
+// server.js — Backend LunchApp v2
+// ═══════════════════════════════════════════════════════════════════════════════
 
-const express = require('express');
-const bcrypt  = require('bcryptjs');
-const jwt     = require('jsonwebtoken');
-const cors    = require('cors');
-const fs      = require('fs');
-const path    = require('path');
+require('dotenv').config();
+
+const express    = require('express');
+const bcrypt     = require('bcryptjs');
+const jwt        = require('jsonwebtoken');
+const cors       = require('cors');
+const fs         = require('fs');
+const path       = require('path');
+const nodemailer = require('nodemailer');
+const PDFDocument = require('pdfkit');
 
 const app        = express();
 const PORT       = process.env.PORT       || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'lunchapp_2024_key';
-const LOCK_MS    = 5 * 60 * 1000; // 5 minutes en millisecondes
+const JWT_SECRET = process.env.JWT_SECRET || 'lunchapp_2024_secret_key';
+const LOCK_MIN   = 5; // minutes avant verrouillage du choix
 
-// ── Détecte si on est sur Vercel (variables KV présentes) ─────────────────────
-const IS_VERCEL = !!process.env.KV_REST_API_URL;
+app.use(cors());
+app.use(express.json({ limit: '20mb' }));
+app.use(express.static('public'));
 
-// ── Superadmin hardcodé ───────────────────────────────────────────────────────
+// ── Superadmin (via .env) ─────────────────────────────────────────────────────
 const SUPERADMIN = {
   id:       'superadmin-001',
-  email:    'admin.text.elimmeka@gmail.com',
-  password: '@admin2101',
-  fullName: 'Super Administrateur',
+  email:    process.env.ADMIN_EMAIL    || 'admin@lunchapp.com',
+  password: process.env.ADMIN_PASSWORD || 'ChangeMe!',
+  fullName: process.env.ADMIN_FULLNAME || 'Super Administrateur',
   role:     'superadmin',
 };
 
-// ── Clés de stockage KV (Vercel) / noms de fichiers (local) ──────────────────
-const KEYS = {
-  enterprises:    'la:enterprises',
-  employees:      'la:employees',
-  restauratrices: 'la:restauratrices',
-  choices:        'la:choices',
-  messages:       'la:messages',
+// ── Mailer ────────────────────────────────────────────────────────────────────
+const mailer = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.MAIL_USER,
+    pass: process.env.MAIL_PASS,
+  },
+});
+
+async function sendWelcomeEmail({ to, name, role }) {
+  if (!process.env.MAIL_USER || !process.env.MAIL_PASS ||
+      process.env.MAIL_PASS === 'votre_mot_de_passe_application_gmail') return;
+
+  const roleLabel = role === 'enterprise' ? 'Entreprise' : 'Restaurant';
+  const html = `
+  <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;border:1px solid #E2E8F0;border-radius:10px;overflow:hidden">
+    <div style="background:#F97316;padding:24px 32px">
+      <h1 style="color:#fff;margin:0;font-size:22px">🍽️ LunchApp</h1>
+    </div>
+    <div style="padding:32px">
+      <h2 style="margin-top:0">Bienvenue, ${name} !</h2>
+      <p>Votre compte <strong>${roleLabel}</strong> a été créé avec succès sur <strong>LunchApp</strong>.</p>
+      <p>Vous pouvez dès maintenant vous connecter et commencer à utiliser l'application :</p>
+      <ul>
+        ${role === 'enterprise' ? `
+          <li>Affiliez-vous aux restaurants de votre choix</li>
+          <li>Gérez vos employés et suivez leurs commandes</li>
+          <li>Consultez les statistiques de consommation</li>
+        ` : `
+          <li>Publiez votre menu complet (plats & boissons)</li>
+          <li>Définissez votre menu journalier</li>
+          <li>Gérez vos commandes et votre clientèle</li>
+        `}
+      </ul>
+      <div style="margin:24px 0;text-align:center">
+        <a href="http://localhost:${PORT}" style="background:#F97316;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold">
+          Accéder à LunchApp
+        </a>
+      </div>
+      <p style="color:#64748B;font-size:13px">
+        Si vous n'êtes pas à l'origine de cette inscription, ignorez cet e-mail.
+      </p>
+    </div>
+    <div style="background:#F1F5F9;padding:14px 32px;font-size:12px;color:#94A3B8;text-align:center">
+      © ${new Date().getFullYear()} LunchApp — Tous droits réservés
+    </div>
+  </div>`;
+
+  try {
+    await mailer.sendMail({
+      from:    process.env.MAIL_FROM || 'LunchApp <noreply@lunchapp.com>',
+      to,
+      subject: `✅ Bienvenue sur LunchApp, ${name} !`,
+      html,
+    });
+  } catch (err) {
+    console.error('[Mailer] Échec envoi email à', to, ':', err.message);
+  }
+}
+
+// ── Dossier data ──────────────────────────────────────────────────────────────
+const DB_DIR = process.env.DB_DIR || path.join(__dirname, 'data');
+if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
+
+const FILES = {
+  enterprises:      'enterprises.json',
+  employees:        'employees.json',
+  restaurants:      'restauratrices.json',
+  menus:            'menus.json',
+  dailyMenus:       'dailyMenus.json',
+  affiliations:     'affiliations.json',
+  offers:           'offers.json',
+  choices:          'choices.json',
+  orders:           'orders.json',
+  subscriptions:    'subscriptions.json',
+  notifications:    'notifications.json',
+  ratings:          'ratings.json',
+  deletionRequests: 'deletionRequests.json',
+  messages:         'messages.json',
+  passwordResets:   'passwordResets.json',
 };
 
-// ── Dossier data/ pour le stockage local (override possible via DB_DIR pour les tests) ──
-const DB_DIR = process.env.DB_DIR || path.join(__dirname, 'data');
-if (!IS_VERCEL && !fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
+function read(key) {
+  const f = path.join(DB_DIR, FILES[key]);
+  if (!fs.existsSync(f)) return [];
+  try { return JSON.parse(fs.readFileSync(f, 'utf8')) || []; } catch { return []; }
+}
 
-// ── Lecture des données (JSON local OU Vercel KV) ─────────────────────────────
-async function readDB(key) {
-  if (IS_VERCEL) {
-    // Production Vercel : lit depuis le KV Redis
-    try {
-      const { kv } = require('@vercel/kv');
-      const data   = await kv.get(key);
-      return data || [];
-    } catch (err) {
-      console.error('KV readDB error:', err.message);
-      return [];
-    }
-  } else {
-    // Local : lit depuis un fichier JSON
-    const fileName = key.replace('la:', '') + '.json';
-    const filePath = path.join(DB_DIR, fileName);
-    if (!fs.existsSync(filePath)) return [];
-    try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); }
-    catch { return []; }
+function write(key, data) {
+  fs.writeFileSync(path.join(DB_DIR, FILES[key]), JSON.stringify(data, null, 2));
+}
+
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getStartDate(frequency) {
+  const now = new Date();
+  const d = new Date(now);
+  switch (frequency) {
+    case 'daily':       d.setHours(0, 0, 0, 0); return d;
+    case 'weekly':      d.setDate(now.getDate() - 7); return d;
+    case 'monthly':     d.setMonth(now.getMonth() - 1); return d;
+    case 'quarterly':   d.setMonth(now.getMonth() - 3); return d;
+    case 'semi-annual': d.setMonth(now.getMonth() - 6); return d;
+    case 'annual':      d.setFullYear(now.getFullYear() - 1); return d;
+    default:            return new Date(0);
   }
 }
 
-// ── Écriture des données (JSON local OU Vercel KV) ────────────────────────────
-async function writeDB(key, data) {
-  if (IS_VERCEL) {
-    // Production Vercel : écrit dans le KV Redis
-    try {
-      const { kv } = require('@vercel/kv');
-      await kv.set(key, data);
-    } catch (err) {
-      console.error('KV writeDB error:', err.message);
-      throw err;
-    }
-  } else {
-    // Local : écrit dans un fichier JSON
-    const fileName = key.replace('la:', '') + '.json';
-    const filePath = path.join(DB_DIR, fileName);
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+// ── Auth middleware ───────────────────────────────────────────────────────────
+function auth(req, res, next) {
+  const h = req.headers.authorization || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : req.query.token;
+  if (!token) return res.status(401).json({ error: 'Non authentifié' });
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    res.status(401).json({ error: 'Token invalide' });
   }
 }
 
-// ── Middlewares ───────────────────────────────────────────────────────────────
-app.use(cors());
-app.use(express.json({ limit: '8mb' })); // 8 MB pour les messages audio base64
-app.use(express.static(path.join(__dirname, 'public')));
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role))
+      return res.status(403).json({ error: 'Accès refusé' });
+    next();
+  };
+}
 
-// ── SSE : Map userId → [Response, ...] ───────────────────────────────────────
+function validatePassword(pwd) {
+  return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&._-])[A-Za-z\d@$!%*?&._-]{8,}$/.test(pwd);
+}
+
+// ── SSE ───────────────────────────────────────────────────────────────────────
 const sseClients = new Map();
 
-function pushSSE(userId, payload) {
-  const clients = sseClients.get(userId) || [];
-  const data    = `data: ${JSON.stringify(payload)}\n\n`;
-  clients.forEach(res => { try { res.write(data); } catch {} });
+function sseNotify(userId, event, data) {
+  const res = sseClients.get(String(userId));
+  if (res) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-// ── Middleware JWT ────────────────────────────────────────────────────────────
-function auth(req, res, next) {
-  const header = req.headers.authorization;
-  if (!header?.startsWith('Bearer '))
-    return res.status(401).json({ error: 'Non autorisé' });
-  try {
-    req.user = jwt.verify(header.slice(7), JWT_SECRET);
-    next();
-  } catch {
-    res.status(401).json({ error: 'Token invalide ou expiré' });
-  }
+app.get('/api/events', (req, res) => {
+  const token = req.query.token;
+  if (!token) return res.status(401).end();
+  let user;
+  try { user = jwt.verify(token, JWT_SECRET); } catch { return res.status(401).end(); }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.write(`event: connected\ndata: ${JSON.stringify({ userId: user.id })}\n\n`);
+  sseClients.set(String(user.id), res);
+
+  const ping = setInterval(() => res.write(': ping\n\n'), 25000);
+  req.on('close', () => { clearInterval(ping); sseClients.delete(String(user.id)); });
+});
+
+// ── Helpers notifications ─────────────────────────────────────────────────────
+function pushNotif(userId, userRole, type, title, message, data = {}) {
+  const notifs = read('notifications');
+  const n = {
+    id: uid(), userId: String(userId), userRole, type,
+    title, message, data, read: false,
+    createdAt: new Date().toISOString(),
+  };
+  notifs.push(n);
+  write('notifications', notifs);
+  sseNotify(userId, 'notification', n);
+  return n;
 }
 
-// ── Middleware JWT pour SSE (accepte aussi ?token= en query) ──────────────────
-function authSSE(req, res, next) {
-  const header = req.headers.authorization;
-  const t = header?.startsWith('Bearer ') ? header.slice(7) : req.query.token;
-  if (!t) return res.status(401).end();
-  try {
-    req.user = jwt.verify(t, JWT_SECRET);
-    next();
-  } catch {
-    res.status(401).end();
-  }
-}
-
-// ── Validation mot de passe entreprise ───────────────────────────────────────
-function validateEnterprisePwd(pwd) {
-  if (!pwd || pwd.length < 8)
-    return 'Minimum 8 caractères requis';
-  if (!/[A-Z]/.test(pwd))
-    return 'Au moins une lettre majuscule requise';
-  if (!/[a-z]/.test(pwd))
-    return 'Au moins une lettre minuscule requise';
-  if (!/[0-9]/.test(pwd))
-    return 'Au moins un chiffre requis';
-  if (!/[!@#$%^&*()\-_=+\[\]{};:'",.<>?/\\|`~]/.test(pwd))
-    return 'Au moins un caractère spécial requis';
-  return null;
-}
-
-// ── Variantes Prénom Nom / Nom Prénom ─────────────────────────────────────────
-function nameVariants(inputName) {
-  const normalized = inputName.trim().toLowerCase();
-  const parts      = normalized.split(/\s+/).filter(Boolean);
-  if (parts.length === 2)
-    return [parts.join(' '), `${parts[1]} ${parts[0]}`];
-  return [normalized];
-}
-
-// ── Date du jour YYYY-MM-DD ───────────────────────────────────────────────────
-function todayStr() {
-  return new Date().toISOString().split('T')[0];
-}
-
-// ════════════════════════════════════════════════════════════════════
-// ROUTES D'AUTHENTIFICATION
-// ════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────────
+// AUTH ROUTES
+// ─────────────────────────────────────────────────────────────────────────────
 
 app.post('/api/login', async (req, res) => {
-  try {
-    const { identifier, password, loginType } = req.body;
+  const { email, password, type } = req.body;
+  if (!email || !password || !type) return res.status(400).json({ error: 'Champs requis' });
 
-    if (!identifier || !identifier.toString().trim())
-      return res.status(400).json({ error: 'Identifiant requis' });
-    if (!password)
-      return res.status(400).json({ error: 'Mot de passe requis' });
-    if (!loginType)
-      return res.status(400).json({ error: 'Type de connexion requis' });
-
-    const id = identifier.toString().trim();
-
-    // ── Superadmin ────────────────────────────────────────────────────────────
-    if (loginType === 'superadmin') {
-      const emailMatch = id.toLowerCase() === SUPERADMIN.email.toLowerCase();
-      const pwdMatch   = password === SUPERADMIN.password;
-      if (!emailMatch || !pwdMatch) {
-        console.log(`[ADMIN] Échec : reçu="${id}" | attendu="${SUPERADMIN.email}"`);
-        return res.status(401).json({ error: 'Identifiants administrateur incorrects' });
-      }
-      const token = jwt.sign(
-        { id: SUPERADMIN.id, role: 'superadmin', fullName: SUPERADMIN.fullName },
-        JWT_SECRET, { expiresIn: '7d' }
-      );
-      return res.json({
-        token,
-        user: { id: SUPERADMIN.id, fullName: SUPERADMIN.fullName, role: 'superadmin' }
-      });
+  if (type === 'superadmin') {
+    if (email === SUPERADMIN.email && password === SUPERADMIN.password) {
+      const token = jwt.sign({ id: SUPERADMIN.id, role: 'superadmin', fullName: SUPERADMIN.fullName }, JWT_SECRET, { expiresIn: '7d' });
+      return res.json({ token, user: { id: SUPERADMIN.id, role: 'superadmin', fullName: SUPERADMIN.fullName } });
     }
-
-    // ── Entreprise ────────────────────────────────────────────────────────────
-    if (loginType === 'enterprise') {
-      const enterprises = await readDB(KEYS.enterprises);
-      const ent = enterprises.find(e =>
-        e.companyName.toLowerCase().trim() === id.toLowerCase()
-      );
-      if (!ent) return res.status(401).json({ error: "Nom d'entreprise ou mot de passe incorrect" });
-      const valid = await bcrypt.compare(password, ent.password);
-      if (!valid) return res.status(401).json({ error: "Nom d'entreprise ou mot de passe incorrect" });
-      const token = jwt.sign(
-        { id: ent.id, role: 'enterprise', fullName: ent.companyName, companyName: ent.companyName, domain: ent.domain },
-        JWT_SECRET, { expiresIn: '7d' }
-      );
-      return res.json({
-        token,
-        user: { id: ent.id, fullName: ent.companyName, role: 'enterprise', companyName: ent.companyName, domain: ent.domain }
-      });
-    }
-
-    // ── Restauratrice ─────────────────────────────────────────────────────────
-    if (loginType === 'restauratrice') {
-      const restauratrices = await readDB(KEYS.restauratrices);
-      const variants       = nameVariants(id);
-      const resto          = restauratrices.find(r =>
-        variants.includes(r.fullName.trim().toLowerCase())
-      );
-      if (!resto) return res.status(401).json({ error: 'Nom ou mot de passe incorrect' });
-      const valid = await bcrypt.compare(password, resto.password);
-      if (!valid) return res.status(401).json({ error: 'Nom ou mot de passe incorrect' });
-      const token = jwt.sign(
-        { id: resto.id, role: 'restauratrice', fullName: resto.fullName, enterpriseId: resto.enterpriseId, enterpriseName: resto.enterpriseName },
-        JWT_SECRET, { expiresIn: '7d' }
-      );
-      return res.json({
-        token,
-        user: { id: resto.id, fullName: resto.fullName, role: 'restauratrice', enterpriseId: resto.enterpriseId, enterpriseName: resto.enterpriseName }
-      });
-    }
-
-    // ── Employé ───────────────────────────────────────────────────────────────
-    if (loginType === 'employee') {
-      const employees = await readDB(KEYS.employees);
-      const variants  = nameVariants(id);
-      const emp       = employees.find(e =>
-        variants.includes(e.fullName.trim().toLowerCase())
-      );
-      if (!emp) return res.status(401).json({ error: 'Nom ou mot de passe incorrect' });
-      const valid = await bcrypt.compare(password, emp.password);
-      if (!valid) return res.status(401).json({ error: 'Nom ou mot de passe incorrect' });
-      const token = jwt.sign(
-        { id: emp.id, role: 'employee', fullName: emp.fullName, enterpriseId: emp.enterpriseId, enterpriseName: emp.enterpriseName },
-        JWT_SECRET, { expiresIn: '7d' }
-      );
-      return res.json({
-        token,
-        user: { id: emp.id, fullName: emp.fullName, role: 'employee', enterpriseId: emp.enterpriseId, enterpriseName: emp.enterpriseName }
-      });
-    }
-
-    return res.status(400).json({ error: 'Type de connexion non reconnu' });
-
-  } catch (err) {
-    console.error('Erreur /api/login:', err);
-    res.status(500).json({ error: 'Erreur serveur' });
+    return res.status(401).json({ error: 'Identifiants invalides' });
   }
+
+  let users, userObj;
+
+  if (type === 'enterprise') {
+    users = read('enterprises');
+    userObj = users.find(u => u.email?.toLowerCase() === email.toLowerCase().trim());
+  } else if (type === 'restaurant') {
+    users = read('restaurants');
+    userObj = users.find(u => u.email?.toLowerCase() === email.toLowerCase().trim());
+  } else if (type === 'employee') {
+    users = read('employees');
+    const lower = email.toLowerCase().trim();
+    userObj = users.find(u => {
+      const n = u.fullName.toLowerCase();
+      const parts = n.split(' ');
+      return n === lower || parts.slice().reverse().join(' ') === lower;
+    });
+  } else {
+    return res.status(400).json({ error: 'Type de compte invalide' });
+  }
+
+  if (!userObj) return res.status(401).json({ error: 'Identifiants invalides' });
+
+  const valid = await bcrypt.compare(password, userObj.password);
+  if (!valid) return res.status(401).json({ error: 'Identifiants invalides' });
+
+  const payload = { id: userObj.id, role: userObj.role };
+  if (userObj.role === 'enterprise') payload.companyName = userObj.companyName;
+  if (userObj.role === 'restauratrice') payload.restaurantName = userObj.restaurantName;
+  if (userObj.role === 'employee') {
+    payload.fullName = userObj.fullName;
+    payload.enterpriseId = userObj.enterpriseId;
+    payload.enterpriseName = userObj.enterpriseName;
+  }
+
+  const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+  const { password: _, ...safe } = userObj;
+  res.json({ token, user: safe });
+});
+
+// ── Mot de passe oublié ───────────────────────────────────────────────────────
+app.post('/api/auth/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email requis' });
+
+  // Chercher dans entreprises et restaurants
+  const lower = email.toLowerCase().trim();
+  let found = null, role = null;
+  const ent = read('enterprises').find(e => e.email?.toLowerCase() === lower);
+  if (ent)  { found = ent;  role = 'enterprise'; }
+  const rst = !found && read('restaurants').find(r => r.email?.toLowerCase() === lower);
+  if (rst)  { found = rst;  role = 'restaurant'; }
+
+  // Réponse identique que l'email existe ou non (sécurité)
+  res.json({ message: 'Si cet email est enregistré, vous recevrez un lien de réinitialisation.' });
+
+  if (!found) return;
+
+  // Générer token (valable 30 min)
+  const token    = uid() + uid();
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+  const resets   = read('passwordResets').filter(r => r.email !== lower); // un seul token actif par email
+  resets.push({ token, email: lower, role, expiresAt });
+  write('passwordResets', resets);
+
+  const resetLink = `http://localhost:${PORT}/?reset=${token}`;
+  const html = `
+  <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;border:1px solid #E2E8F0;border-radius:10px;overflow:hidden">
+    <div style="background:#F97316;padding:24px 32px">
+      <h1 style="color:#fff;margin:0;font-size:22px">🍽️ LunchApp</h1>
+    </div>
+    <div style="padding:32px">
+      <h2 style="margin-top:0">Réinitialisation du mot de passe</h2>
+      <p>Bonjour <strong>${found.companyName || found.restaurantName}</strong>,</p>
+      <p>Vous avez demandé la réinitialisation de votre mot de passe. Cliquez sur le bouton ci-dessous :</p>
+      <div style="margin:24px 0;text-align:center">
+        <a href="${resetLink}" style="background:#F97316;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold">
+          Réinitialiser mon mot de passe
+        </a>
+      </div>
+      <p style="color:#64748B;font-size:13px">Ce lien expire dans <strong>30 minutes</strong>.<br/>
+      Si vous n'avez pas demandé cette réinitialisation, ignorez cet e-mail.</p>
+    </div>
+    <div style="background:#F1F5F9;padding:14px 32px;font-size:12px;color:#94A3B8;text-align:center">
+      © ${new Date().getFullYear()} LunchApp — Tous droits réservés
+    </div>
+  </div>`;
+
+  try {
+    await mailer.sendMail({
+      from:    process.env.MAIL_FROM || 'LunchApp <noreply@lunchapp.com>',
+      to:      found.email,
+      subject: '🔑 Réinitialisation de votre mot de passe LunchApp',
+      html,
+    });
+  } catch (err) {
+    console.error('[Mailer] Échec reset email :', err.message);
+  }
+});
+
+// ── Réinitialisation du mot de passe ─────────────────────────────────────────
+app.post('/api/auth/reset-password', async (req, res) => {
+  const { token, newPassword } = req.body;
+  if (!token || !newPassword) return res.status(400).json({ error: 'Token et nouveau mot de passe requis' });
+  if (!validatePassword(newPassword)) return res.status(400).json({ error: 'Mot de passe trop faible (8 car. min, maj, min, chiffre, spécial)' });
+
+  const resets = read('passwordResets');
+  const entry  = resets.find(r => r.token === token);
+  if (!entry)                          return res.status(400).json({ error: 'Lien invalide ou déjà utilisé' });
+  if (new Date(entry.expiresAt) < new Date()) {
+    write('passwordResets', resets.filter(r => r.token !== token));
+    return res.status(400).json({ error: 'Lien expiré. Veuillez refaire une demande.' });
+  }
+
+  const hashed = await bcrypt.hash(newPassword, 10);
+
+  if (entry.role === 'enterprise') {
+    const list = read('enterprises');
+    const idx  = list.findIndex(e => e.email === entry.email);
+    if (idx === -1) return res.status(404).json({ error: 'Compte introuvable' });
+    list[idx].password = hashed;
+    write('enterprises', list);
+  } else {
+    const list = read('restaurants');
+    const idx  = list.findIndex(r => r.email === entry.email);
+    if (idx === -1) return res.status(404).json({ error: 'Compte introuvable' });
+    list[idx].password = hashed;
+    write('restaurants', list);
+  }
+
+  // Invalider le token
+  write('passwordResets', resets.filter(r => r.token !== token));
+  res.json({ message: 'Mot de passe mis à jour avec succès.' });
 });
 
 // ── Inscription entreprise ────────────────────────────────────────────────────
 app.post('/api/enterprise/register', async (req, res) => {
-  try {
-    const { companyName, domain, password } = req.body;
+  const { companyName, email, password, phone, location } = req.body;
+  if (!companyName || !email || !password) return res.status(400).json({ error: 'Champs requis' });
+  if (!validatePassword(password)) return res.status(400).json({ error: 'Mot de passe trop faible (8 car. min, maj, min, chiffre, spécial)' });
 
-    if (!companyName || !domain || !password)
-      return res.status(400).json({ error: 'Tous les champs sont obligatoires' });
+  const enterprises = read('enterprises');
+  if (enterprises.find(e => e.email?.toLowerCase() === email.toLowerCase()))
+    return res.status(409).json({ error: 'Email déjà utilisé' });
 
-    const pwdError = validateEnterprisePwd(password);
-    if (pwdError) return res.status(400).json({ error: pwdError });
+  const hashed = await bcrypt.hash(password, 10);
+  const enterprise = {
+    id: uid(), companyName: companyName.trim(), email: email.toLowerCase().trim(),
+    password: hashed, phone: phone || '', location: location || '',
+    role: 'enterprise', createdAt: new Date().toISOString(),
+  };
+  enterprises.push(enterprise);
+  write('enterprises', enterprises);
 
-    const enterprises = await readDB(KEYS.enterprises);
+  const token = jwt.sign({ id: enterprise.id, role: 'enterprise', companyName: enterprise.companyName }, JWT_SECRET, { expiresIn: '7d' });
+  const { password: _, ...safe } = enterprise;
+  res.status(201).json({ token, user: safe });
 
-    if (enterprises.find(e =>
-      e.companyName.toLowerCase().trim() === companyName.toLowerCase().trim()
-    )) return res.status(409).json({ error: "Ce nom d'entreprise est déjà utilisé" });
-
-    const hashedPwd     = await bcrypt.hash(password, 10);
-    const newEnterprise = {
-      id:          Date.now().toString(),
-      companyName: companyName.trim(),
-      domain:      domain.trim(),
-      password:    hashedPwd,
-      role:        'enterprise',
-      createdAt:   new Date().toISOString(),
-    };
-
-    enterprises.push(newEnterprise);
-    await writeDB(KEYS.enterprises, enterprises);
-
-    const token = jwt.sign(
-      { id: newEnterprise.id, role: 'enterprise', fullName: newEnterprise.companyName, companyName: newEnterprise.companyName, domain: newEnterprise.domain },
-      JWT_SECRET, { expiresIn: '7d' }
-    );
-    res.status(201).json({
-      token,
-      user: { id: newEnterprise.id, fullName: newEnterprise.companyName, role: 'enterprise', companyName: newEnterprise.companyName, domain: newEnterprise.domain }
-    });
-
-  } catch (err) {
-    console.error('Erreur register enterprise:', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
+  // Email de bienvenue (non bloquant)
+  sendWelcomeEmail({ to: enterprise.email, name: enterprise.companyName, role: 'enterprise' });
 });
 
-// ── Inscription restauratrice ─────────────────────────────────────────────────
+// ── Inscription restaurant ────────────────────────────────────────────────────
 app.post('/api/restauratrice/register', async (req, res) => {
-  try {
-    const { fullName, password } = req.body;
+  const { restaurantName, fullName, email, password, phone, specialty, address, paymentInfo } = req.body;
+  if (!restaurantName || !fullName || !email || !password) return res.status(400).json({ error: 'Champs requis' });
+  if (!validatePassword(password)) return res.status(400).json({ error: 'Mot de passe trop faible' });
 
-    if (!fullName || !password)
-      return res.status(400).json({ error: 'Tous les champs sont obligatoires' });
-    if (password.length < 6)
-      return res.status(400).json({ error: 'Mot de passe minimum 6 caractères' });
+  const restaurants = read('restaurants');
+  if (restaurants.find(r => r.email?.toLowerCase() === email.toLowerCase()))
+    return res.status(409).json({ error: 'Email déjà utilisé' });
 
-    const restauratrices = await readDB(KEYS.restauratrices);
+  const hashed = await bcrypt.hash(password, 10);
+  const restaurant = {
+    id: uid(), restaurantName: restaurantName.trim(), fullName: fullName.trim(),
+    email: email.toLowerCase().trim(), password: hashed,
+    phone: phone || '', specialty: specialty || '', address: address || '',
+    description: '', photo: '',
+    paymentInfo: Array.isArray(paymentInfo) ? paymentInfo : [],
+    role: 'restauratrice', createdAt: new Date().toISOString(),
+  };
+  restaurants.push(restaurant);
+  write('restaurants', restaurants);
 
-    if (restauratrices.find(r =>
-      r.fullName.toLowerCase().trim() === fullName.toLowerCase().trim()
-    )) return res.status(409).json({ error: 'Ce nom est déjà utilisé' });
+  const token = jwt.sign({ id: restaurant.id, role: 'restauratrice', restaurantName: restaurant.restaurantName }, JWT_SECRET, { expiresIn: '7d' });
+  const { password: _, ...safe } = restaurant;
+  res.status(201).json({ token, user: safe });
 
-    const hashedPwd = await bcrypt.hash(password, 10);
-    const newResto  = {
-      id:        Date.now().toString(),
-      fullName:  fullName.trim(),
-      password:  hashedPwd,
-      role:      'restauratrice',
-      createdAt: new Date().toISOString(),
-    };
-
-    restauratrices.push(newResto);
-    await writeDB(KEYS.restauratrices, restauratrices);
-
-    const token = jwt.sign(
-      { id: newResto.id, role: 'restauratrice', fullName: newResto.fullName },
-      JWT_SECRET, { expiresIn: '7d' }
-    );
-    res.status(201).json({
-      token,
-      user: { id: newResto.id, fullName: newResto.fullName, role: 'restauratrice' }
-    });
-
-  } catch (err) {
-    console.error('Erreur register restauratrice:', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
+  // Email de bienvenue (non bloquant)
+  sendWelcomeEmail({ to: restaurant.email, name: restaurant.restaurantName, role: 'restaurant' });
 });
 
-// ════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────────
+// RESTAURANTS (lecture publique)
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.get('/api/restaurants', auth, (req, res) => {
+  const restaurants = read('restaurants').map(({ password, ...r }) => r);
+  res.json(restaurants);
+});
+
+app.get('/api/restaurants/:id', auth, (req, res) => {
+  const r = read('restaurants').find(r => r.id === req.params.id);
+  if (!r) return res.status(404).json({ error: 'Restaurant introuvable' });
+  const { password, ...safe } = r;
+  res.json(safe);
+});
+
+// ── Profil restaurant ─────────────────────────────────────────────────────────
+app.patch('/api/restaurant/profile', auth, requireRole('restauratrice'), async (req, res) => {
+  const { restaurantName, fullName, phone, address, specialty, description, photo, paymentInfo, password, newPassword } = req.body;
+
+  const restaurants = read('restaurants');
+  const idx = restaurants.findIndex(r => r.id === req.user.id);
+  if (idx === -1) return res.status(404).json({ error: 'Restaurant introuvable' });
+  const r = restaurants[idx];
+
+  if (restaurantName !== undefined) r.restaurantName = restaurantName.trim();
+  if (fullName      !== undefined) r.fullName = fullName.trim();
+  if (phone         !== undefined) r.phone = phone;
+  if (address       !== undefined) r.address = address;
+  if (specialty     !== undefined) r.specialty = specialty;
+  if (description   !== undefined) r.description = description;
+  if (photo         !== undefined) r.photo = photo;
+  if (paymentInfo   !== undefined) r.paymentInfo = paymentInfo;
+
+  if (newPassword && password) {
+    const valid = await bcrypt.compare(password, r.password);
+    if (!valid) return res.status(400).json({ error: 'Ancien mot de passe incorrect' });
+    r.password = await bcrypt.hash(newPassword, 10);
+  }
+  r.updatedAt = new Date().toISOString();
+
+  write('restaurants', restaurants);
+  const { password: _, ...safe } = r;
+  res.json(safe);
+});
+
+// ── Profil actuel du restaurant connecté ─────────────────────────────────────
+app.get('/api/restaurant/me', auth, requireRole('restauratrice'), (req, res) => {
+  const r = read('restaurants').find(r => r.id === req.user.id);
+  if (!r) return res.status(404).json({ error: 'Restaurant introuvable' });
+  const { password, ...safe } = r;
+  res.json(safe);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MENU COMPLET (gestion par le restaurant)
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.get('/api/restaurant/menu', auth, requireRole('restauratrice'), (req, res) => {
+  const menu = read('menus').find(m => m.restaurantId === req.user.id) || { restaurantId: req.user.id, items: [] };
+  res.json(menu);
+});
+
+app.post('/api/restaurant/menu/items', auth, requireRole('restauratrice'), (req, res) => {
+  const { name, category, price, description } = req.body;
+  if (!name || !category) return res.status(400).json({ error: 'Nom et catégorie requis' });
+  if (!['food', 'drink'].includes(category)) return res.status(400).json({ error: 'Catégorie invalide (food ou drink)' });
+  if (price === undefined || price === null || isNaN(Number(price))) return res.status(400).json({ error: 'Prix requis' });
+
+  const menus = read('menus');
+  let menu = menus.find(m => m.restaurantId === req.user.id);
+  if (!menu) { menu = { restaurantId: req.user.id, items: [] }; menus.push(menu); }
+
+  const item = { id: uid(), name: name.trim(), category, price: Number(price), description: description || '' };
+  menu.items.push(item);
+  menu.updatedAt = new Date().toISOString();
+  write('menus', menus);
+  res.status(201).json(item);
+});
+
+app.put('/api/restaurant/menu/items/:itemId', auth, requireRole('restauratrice'), (req, res) => {
+  const menus = read('menus');
+  const menu = menus.find(m => m.restaurantId === req.user.id);
+  if (!menu) return res.status(404).json({ error: 'Menu introuvable' });
+
+  const idx = menu.items.findIndex(i => i.id === req.params.itemId);
+  if (idx === -1) return res.status(404).json({ error: 'Article introuvable' });
+
+  const { name, category, price, description } = req.body;
+  if (name        !== undefined) menu.items[idx].name = name.trim();
+  if (category    !== undefined) menu.items[idx].category = category;
+  if (price       !== undefined) menu.items[idx].price = Number(price);
+  if (description !== undefined) menu.items[idx].description = description;
+  menu.updatedAt = new Date().toISOString();
+
+  write('menus', menus);
+  res.json(menu.items[idx]);
+});
+
+app.delete('/api/restaurant/menu/items/:itemId', auth, requireRole('restauratrice'), (req, res) => {
+  const menus = read('menus');
+  const menu = menus.find(m => m.restaurantId === req.user.id);
+  if (!menu) return res.status(404).json({ error: 'Menu introuvable' });
+
+  menu.items = menu.items.filter(i => i.id !== req.params.itemId);
+  menu.updatedAt = new Date().toISOString();
+  write('menus', menus);
+
+  // Supprimer aussi des menus journaliers
+  const dailyMenus = read('dailyMenus');
+  dailyMenus.forEach(d => {
+    if (d.restaurantId === req.user.id)
+      d.availableItems = (d.availableItems || []).filter(id => id !== req.params.itemId);
+  });
+  write('dailyMenus', dailyMenus);
+
+  res.json({ success: true });
+});
+
+// Menu d'un restaurant (pour entreprises/employés affiliés)
+app.get('/api/restaurants/:id/menu', auth, (req, res) => {
+  if (req.user.role === 'enterprise') {
+    const aff = read('affiliations');
+    if (!aff.some(a => a.enterpriseId === req.user.id && a.restaurantId === req.params.id))
+      return res.status(403).json({ error: 'Non affilié à ce restaurant' });
+  } else if (req.user.role === 'employee') {
+    const aff = read('affiliations');
+    if (!aff.some(a => a.enterpriseId === req.user.enterpriseId && a.restaurantId === req.params.id))
+      return res.status(403).json({ error: 'Non affilié à ce restaurant' });
+  }
+  const menu = read('menus').find(m => m.restaurantId === req.params.id) || { restaurantId: req.params.id, items: [] };
+  res.json(menu);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MENU JOURNALIER
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.get('/api/restaurant/menu/daily', auth, requireRole('restauratrice'), (req, res) => {
+  const date = req.query.date || todayStr();
+  const dailyMenus = read('dailyMenus');
+  const daily = dailyMenus.find(d => d.restaurantId === req.user.id && d.date === date)
+    || { restaurantId: req.user.id, date, availableItems: [] };
+  res.json(daily);
+});
+
+app.put('/api/restaurant/menu/daily', auth, requireRole('restauratrice'), (req, res) => {
+  const { date, availableItems } = req.body;
+  const d = date || todayStr();
+  if (!Array.isArray(availableItems)) return res.status(400).json({ error: 'availableItems requis' });
+
+  const dailyMenus = read('dailyMenus');
+  const idx = dailyMenus.findIndex(dm => dm.restaurantId === req.user.id && dm.date === d);
+  if (idx >= 0) {
+    dailyMenus[idx].availableItems = availableItems;
+    dailyMenus[idx].updatedAt = new Date().toISOString();
+  } else {
+    dailyMenus.push({ restaurantId: req.user.id, date: d, availableItems, updatedAt: new Date().toISOString() });
+  }
+  write('dailyMenus', dailyMenus);
+  res.json({ date: d, availableItems });
+});
+
+// Menu journalier d'un restaurant donné (pour entreprise/employé affilié)
+app.get('/api/restaurants/:id/menu/daily', auth, (req, res) => {
+  if (req.user.role === 'enterprise') {
+    const aff = read('affiliations');
+    if (!aff.some(a => a.enterpriseId === req.user.id && a.restaurantId === req.params.id))
+      return res.status(403).json({ error: 'Non affilié' });
+  } else if (req.user.role === 'employee') {
+    const aff = read('affiliations');
+    if (!aff.some(a => a.enterpriseId === req.user.enterpriseId && a.restaurantId === req.params.id))
+      return res.status(403).json({ error: 'Non affilié' });
+  }
+
+  const date = req.query.date || todayStr();
+  const daily = read('dailyMenus').find(d => d.restaurantId === req.params.id && d.date === date)
+    || { availableItems: [] };
+  const menu = read('menus').find(m => m.restaurantId === req.params.id) || { items: [] };
+  const items = menu.items.filter(i => daily.availableItems.includes(i.id));
+  res.json({ date, restaurantId: req.params.id, items, foods: items.filter(i => i.category === 'food'), drinks: items.filter(i => i.category === 'drink') });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AFFILIATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Entreprise s'affilie à un restaurant
+app.post('/api/enterprise/restaurants/:restaurantId/affiliate', auth, requireRole('enterprise'), (req, res) => {
+  const { restaurantId } = req.params;
+  if (!read('restaurants').find(r => r.id === restaurantId))
+    return res.status(404).json({ error: 'Restaurant introuvable' });
+
+  const affiliations = read('affiliations');
+  if (affiliations.some(a => a.enterpriseId === req.user.id && a.restaurantId === restaurantId))
+    return res.status(409).json({ error: 'Déjà affilié' });
+
+  const aff = { id: uid(), enterpriseId: req.user.id, enterpriseName: req.user.companyName, restaurantId, createdAt: new Date().toISOString() };
+  affiliations.push(aff);
+  write('affiliations', affiliations);
+
+  pushNotif(restaurantId, 'restauratrice', 'new_affiliation', 'Nouvelle affiliation',
+    `${req.user.companyName} s'est affiliée à votre restaurant.`,
+    { enterpriseId: req.user.id });
+
+  res.status(201).json(aff);
+});
+
+// Entreprise se désaffilie
+app.delete('/api/enterprise/restaurants/:restaurantId/affiliate', auth, requireRole('enterprise'), (req, res) => {
+  const affiliations = read('affiliations').filter(a => !(a.enterpriseId === req.user.id && a.restaurantId === req.params.restaurantId));
+  write('affiliations', affiliations);
+  res.json({ success: true });
+});
+
+// Liste des restaurants affiliés de l'entreprise (avec menus)
+app.get('/api/enterprise/restaurants', auth, requireRole('enterprise'), (req, res) => {
+  const affiliations = read('affiliations').filter(a => a.enterpriseId === req.user.id);
+  const restaurants  = read('restaurants').map(({ password, ...r }) => r);
+  const menus        = read('menus');
+  const dailyMenus   = read('dailyMenus');
+  const t            = todayStr();
+
+  const result = affiliations.map(a => {
+    const r = restaurants.find(r => r.id === a.restaurantId);
+    if (!r) return null;
+    const menu  = menus.find(m => m.restaurantId === a.restaurantId) || { items: [] };
+    const daily = dailyMenus.find(d => d.restaurantId === a.restaurantId && d.date === t) || { availableItems: [] };
+    const dailyItems = menu.items.filter(i => daily.availableItems.includes(i.id));
+    return {
+      ...r, affiliatedAt: a.createdAt,
+      menu: menu.items,
+      dailyMenu: { foods: dailyItems.filter(i => i.category === 'food'), drinks: dailyItems.filter(i => i.category === 'drink') },
+    };
+  }).filter(Boolean);
+
+  res.json(result);
+});
+
+// Restaurant offre ses services à une entreprise
+app.post('/api/restaurant/enterprises/:enterpriseId/offer', auth, requireRole('restauratrice'), (req, res) => {
+  const { enterpriseId } = req.params;
+  if (!read('enterprises').find(e => e.id === enterpriseId))
+    return res.status(404).json({ error: 'Entreprise introuvable' });
+
+  const offers = read('offers');
+  if (offers.some(o => o.restaurantId === req.user.id && o.enterpriseId === enterpriseId))
+    return res.status(409).json({ error: 'Offre déjà envoyée' });
+
+  const offer = { id: uid(), restaurantId: req.user.id, restaurantName: req.user.restaurantName, enterpriseId, createdAt: new Date().toISOString() };
+  offers.push(offer);
+  write('offers', offers);
+
+  pushNotif(enterpriseId, 'enterprise', 'service_offer', 'Offre de service',
+    `${req.user.restaurantName} vous propose ses services.`,
+    { restaurantId: req.user.id });
+
+  res.status(201).json(offer);
+});
+
+// Restaurant retire son offre (et désaffilie)
+app.delete('/api/restaurant/enterprises/:enterpriseId/offer', auth, requireRole('restauratrice'), (req, res) => {
+  write('offers', read('offers').filter(o => !(o.restaurantId === req.user.id && o.enterpriseId === req.params.enterpriseId)));
+  write('affiliations', read('affiliations').filter(a => !(a.restaurantId === req.user.id && a.enterpriseId === req.params.enterpriseId)));
+  res.json({ success: true });
+});
+
+// Clientèle du restaurant
+app.get('/api/restaurant/clientele', auth, requireRole('restauratrice'), (req, res) => {
+  const affiliations = read('affiliations').filter(a => a.restaurantId === req.user.id);
+  const enterprises  = read('enterprises').map(({ password, ...e }) => e);
+  const t            = todayStr();
+  const choices      = read('choices').filter(c => c.restaurantId === req.user.id && c.date === t);
+
+  const result = affiliations.map(a => {
+    const e = enterprises.find(e => e.id === a.enterpriseId);
+    if (!e) return null;
+    return { ...e, affiliatedAt: a.createdAt, todayChoices: choices.filter(c => c.enterpriseId === a.enterpriseId) };
+  }).filter(Boolean);
+
+  res.json(result);
+});
+
+// Toutes les entreprises disponibles pour le restaurant
+app.get('/api/restaurant/enterprises', auth, requireRole('restauratrice'), (req, res) => {
+  const enterprises  = read('enterprises').map(({ password, ...e }) => e);
+  const affiliations = read('affiliations').filter(a => a.restaurantId === req.user.id);
+  const offers       = read('offers').filter(o => o.restaurantId === req.user.id);
+
+  const result = enterprises.map(e => ({
+    ...e,
+    isAffiliated: affiliations.some(a => a.enterpriseId === e.id),
+    hasOffer:     offers.some(o => o.enterpriseId === e.id),
+  }));
+  res.json(result);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // EMPLOYÉS
-// ════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────────
 
-app.post('/api/enterprise/employees', auth, async (req, res) => {
-  try {
-    if (req.user.role !== 'enterprise')
-      return res.status(403).json({ error: 'Accès réservé aux entreprises' });
+app.get('/api/enterprise/employees', auth, requireRole('enterprise'), (req, res) => {
+  res.json(read('employees').filter(e => e.enterpriseId === req.user.id).map(({ password, ...e }) => e));
+});
 
-    const { fullName, password } = req.body;
-    if (!fullName || !password)
-      return res.status(400).json({ error: 'Nom complet et mot de passe requis' });
-    if (password.length < 6)
-      return res.status(400).json({ error: 'Mot de passe minimum 6 caractères' });
+app.post('/api/enterprise/employees', auth, requireRole('enterprise'), async (req, res) => {
+  const { fullName, gender, password } = req.body;
+  if (!fullName || !password) return res.status(400).json({ error: 'Nom et mot de passe requis' });
+  if (!['male', 'female'].includes(gender)) return res.status(400).json({ error: 'Genre requis (male/female)' });
 
-    const employees = await readDB(KEYS.employees);
+  const employees = read('employees');
+  const lower = fullName.toLowerCase().trim();
+  const dup = employees.find(e => {
+    if (e.enterpriseId !== req.user.id) return false;
+    const n = e.fullName.toLowerCase();
+    return n === lower || n.split(' ').reverse().join(' ') === lower;
+  });
+  if (dup) return res.status(409).json({ error: 'Employé avec ce nom déjà existant' });
 
-    if (employees.find(e =>
-      e.fullName.toLowerCase().trim() === fullName.toLowerCase().trim() &&
-      e.enterpriseId === req.user.id
-    )) return res.status(409).json({ error: 'Un employé avec ce nom existe déjà' });
+  const hashed = await bcrypt.hash(password, 10);
+  const employee = {
+    id: uid(), fullName: fullName.trim(), gender, password: hashed,
+    role: 'employee', enterpriseId: req.user.id, enterpriseName: req.user.companyName,
+    createdAt: new Date().toISOString(),
+  };
+  employees.push(employee);
+  write('employees', employees);
 
-    const hashedPwd   = await bcrypt.hash(password, 10);
-    const newEmployee = {
-      id:             Date.now().toString(),
-      fullName:       fullName.trim(),
-      password:       hashedPwd,
-      role:           'employee',
-      enterpriseId:   req.user.id,
-      enterpriseName: req.user.companyName,
-      createdAt:      new Date().toISOString(),
-    };
+  const { password: _, ...safe } = employee;
+  res.status(201).json(safe);
+});
 
-    employees.push(newEmployee);
-    await writeDB(KEYS.employees, employees);
+app.put('/api/enterprise/employees/:id', auth, requireRole('enterprise'), async (req, res) => {
+  const employees = read('employees');
+  const idx = employees.findIndex(e => e.id === req.params.id && e.enterpriseId === req.user.id);
+  if (idx === -1) return res.status(404).json({ error: 'Employé introuvable' });
 
-    res.status(201).json({
-      success:  true,
-      employee: { id: newEmployee.id, fullName: newEmployee.fullName, enterpriseName: newEmployee.enterpriseName }
-    });
+  const { fullName, gender, password, newPassword } = req.body;
+  if (fullName) employees[idx].fullName = fullName.trim();
+  if (gender)   employees[idx].gender = gender;
 
-  } catch (err) {
-    console.error('Erreur création employé:', err);
-    res.status(500).json({ error: 'Erreur serveur' });
+  if (newPassword && password) {
+    const valid = await bcrypt.compare(password, employees[idx].password);
+    if (!valid) return res.status(400).json({ error: 'Ancien mot de passe incorrect' });
+    employees[idx].password = await bcrypt.hash(newPassword, 10);
   }
+  employees[idx].updatedAt = new Date().toISOString();
+  write('employees', employees);
+
+  const { password: _, ...safe } = employees[idx];
+  res.json(safe);
 });
 
-app.get('/api/enterprise/employees', auth, async (req, res) => {
-  if (!['enterprise', 'superadmin'].includes(req.user.role))
-    return res.status(403).json({ error: 'Accès refusé' });
-  const employees = await readDB(KEYS.employees);
-  const filtered  = req.user.role === 'superadmin'
-    ? employees
-    : employees.filter(e => e.enterpriseId === req.user.id);
-  res.json(filtered.map(({ password, ...e }) => e));
-});
-
-app.delete('/api/enterprise/employees/:id', auth, async (req, res) => {
-  if (req.user.role !== 'enterprise')
-    return res.status(403).json({ error: 'Accès refusé' });
-  let employees = await readDB(KEYS.employees);
-  const idx     = employees.findIndex(e =>
-    e.id === req.params.id && e.enterpriseId === req.user.id
-  );
-  if (idx === -1) return res.status(404).json({ error: 'Employé non trouvé' });
-  employees.splice(idx, 1);
-  await writeDB(KEYS.employees, employees);
+app.delete('/api/enterprise/employees/:id', auth, requireRole('enterprise'), (req, res) => {
+  const employees = read('employees');
+  if (!employees.find(e => e.id === req.params.id && e.enterpriseId === req.user.id))
+    return res.status(404).json({ error: 'Employé introuvable' });
+  write('employees', employees.filter(e => e.id !== req.params.id));
   res.json({ success: true });
 });
 
-// ── Création restauratrice par l'entreprise ───────────────────────────────────
-app.post('/api/enterprise/restauratrice', auth, async (req, res) => {
-  try {
-    if (req.user.role !== 'enterprise')
-      return res.status(403).json({ error: 'Accès réservé aux entreprises' });
+// ─────────────────────────────────────────────────────────────────────────────
+// CHOIX DES EMPLOYÉS
+// ─────────────────────────────────────────────────────────────────────────────
 
-    const { fullName, password } = req.body;
-    if (!fullName || !password)
-      return res.status(400).json({ error: 'Nom complet et mot de passe requis' });
-    if (password.length < 6)
-      return res.status(400).json({ error: 'Mot de passe minimum 6 caractères' });
+// Menus journaliers disponibles pour l'employé (tous restaurants affiliés)
+app.get('/api/employee/menus', auth, requireRole('employee'), (req, res) => {
+  const affiliations = read('affiliations').filter(a => a.enterpriseId === req.user.enterpriseId);
+  const restaurants  = read('restaurants').map(({ password, ...r }) => r);
+  const menus        = read('menus');
+  const dailyMenus   = read('dailyMenus');
+  const t            = todayStr();
 
-    const restauratrices = await readDB(KEYS.restauratrices);
-
-    if (restauratrices.find(r =>
-      r.fullName.toLowerCase().trim() === fullName.toLowerCase().trim()
-    )) return res.status(409).json({ error: 'Ce nom est déjà utilisé' });
-
-    const hashedPwd = await bcrypt.hash(password, 10);
-    const newResto  = {
-      id:             Date.now().toString(),
-      fullName:       fullName.trim(),
-      password:       hashedPwd,
-      role:           'restauratrice',
-      enterpriseId:   req.user.id,
-      enterpriseName: req.user.companyName,
-      createdAt:      new Date().toISOString(),
+  const result = affiliations.map(a => {
+    const r = restaurants.find(r => r.id === a.restaurantId);
+    if (!r) return null;
+    const menu  = menus.find(m => m.restaurantId === a.restaurantId) || { items: [] };
+    const daily = dailyMenus.find(d => d.restaurantId === a.restaurantId && d.date === t) || { availableItems: [] };
+    const items = menu.items.filter(i => daily.availableItems.includes(i.id));
+    const foods  = items.filter(i => i.category === 'food');
+    const drinks = items.filter(i => i.category === 'drink');
+    if (!foods.length && !drinks.length) return null;
+    return {
+      restaurant: { id: r.id, restaurantName: r.restaurantName, photo: r.photo, specialty: r.specialty },
+      foods,
+      drinks,
     };
+  }).filter(Boolean);
 
-    restauratrices.push(newResto);
-    await writeDB(KEYS.restauratrices, restauratrices);
-
-    res.status(201).json({
-      success:       true,
-      restauratrice: { id: newResto.id, fullName: newResto.fullName, enterpriseName: newResto.enterpriseName }
-    });
-
-  } catch (err) {
-    console.error('Erreur création restauratrice:', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
+  res.json(result);
 });
 
-// ── Liste des restauratrices d'une entreprise ─────────────────────────────────
-app.get('/api/enterprise/restauratrices', auth, async (req, res) => {
-  if (req.user.role !== 'enterprise')
-    return res.status(403).json({ error: 'Accès refusé' });
-  const restauratrices = await readDB(KEYS.restauratrices);
-  const filtered = restauratrices.filter(r => r.enterpriseId === req.user.id);
-  res.json(filtered.map(({ password, ...r }) => r));
-});
+// Créer un choix
+app.post('/api/choices', auth, requireRole('employee'), (req, res) => {
+  const { restaurantId, foodItemId, drinkItemId } = req.body;
+  if (!restaurantId) return res.status(400).json({ error: 'Restaurant requis' });
+  if (!foodItemId && !drinkItemId) return res.status(400).json({ error: 'Sélectionnez au moins un plat ou une boisson' });
 
-// ── Suppression restauratrice par l'entreprise ────────────────────────────────
-app.delete('/api/enterprise/restauratrices/:id', auth, async (req, res) => {
-  if (req.user.role !== 'enterprise')
-    return res.status(403).json({ error: 'Accès refusé' });
-  let restauratrices = await readDB(KEYS.restauratrices);
-  const idx = restauratrices.findIndex(r =>
-    r.id === req.params.id && r.enterpriseId === req.user.id
-  );
-  if (idx === -1) return res.status(404).json({ error: 'Restauratrice non trouvée' });
-  restauratrices.splice(idx, 1);
-  await writeDB(KEYS.restauratrices, restauratrices);
-  res.json({ success: true });
-});
+  const aff = read('affiliations');
+  if (!aff.some(a => a.enterpriseId === req.user.enterpriseId && a.restaurantId === restaurantId))
+    return res.status(403).json({ error: 'Restaurant non affilié à votre entreprise' });
 
-// ════════════════════════════════════════════════════════════════════
-// CHOIX DE REPAS
-// ════════════════════════════════════════════════════════════════════
+  const t = todayStr();
+  const choices = read('choices');
+  const existing = choices.find(c => c.userId === req.user.id && c.date === t);
 
-app.get('/api/choices/today', auth, async (req, res) => {
-  const all = (await readDB(KEYS.choices)).filter(c => c.date === todayStr());
-  if (req.user.role === 'employee')
-    return res.json(all.filter(c => c.enterpriseId === req.user.enterpriseId));
-  if (req.user.role === 'enterprise')
-    return res.json(all.filter(c => c.enterpriseId === req.user.id));
-  if (req.user.role === 'restauratrice' && req.user.enterpriseId)
-    return res.json(all.filter(c => c.enterpriseId === req.user.enterpriseId));
-  res.json(all);
-});
+  // If a choice already exists, allow update only within the 5-min lock window
+  if (existing) {
+    const elapsed = (Date.now() - new Date(existing.createdAt).getTime()) / 60000;
+    if (elapsed > LOCK_MIN) return res.status(409).json({ error: 'Vous avez déjà fait votre choix aujourd\'hui' });
+    if (existing.orderLaunched) return res.status(403).json({ error: 'La commande a déjà été lancée' });
 
-app.get('/api/choices/mine', auth, async (req, res) => {
-  const all  = await readDB(KEYS.choices);
-  const mine = all.find(c => c.userId === req.user.id && c.date === todayStr());
-  res.json(mine || null);
-});
-
-app.post('/api/choices', auth, async (req, res) => {
-  if (req.user.role !== 'employee')
-    return res.status(403).json({ error: 'Seuls les employés peuvent faire des choix' });
-
-  const { food, customFood } = req.body;
-  if (!food) return res.status(400).json({ error: 'Choix de repas requis' });
-
-  const choices = await readDB(KEYS.choices);
-  const today   = todayStr();
-
-  const isLaunched = choices.some(c =>
-    c.date === today && c.enterpriseId === req.user.enterpriseId && c.orderLaunched
-  );
-  if (isLaunched)
-    return res.status(403).json({ error: "La commande a déjà été lancée aujourd'hui" });
-
-  const existingIdx = choices.findIndex(c => c.userId === req.user.id && c.date === today);
-  if (existingIdx >= 0) {
-    const elapsed = Date.now() - new Date(choices[existingIdx].updatedAt).getTime();
-    if (elapsed > LOCK_MS)
-      return res.status(403).json({ error: 'Le délai de 5 minutes est expiré.', locked: true });
+    const menu = read('menus').find(m => m.restaurantId === existing.restaurantId) || { items: [] };
+    if (foodItemId !== undefined) {
+      if (foodItemId === null) { existing.foodItem = null; }
+      else {
+        const item = menu.items.find(i => i.id === foodItemId && i.category === 'food');
+        if (!item) return res.status(400).json({ error: 'Plat introuvable dans le menu' });
+        existing.foodItem = { id: item.id, name: item.name, price: item.price };
+      }
+    }
+    if (drinkItemId !== undefined) {
+      if (drinkItemId === null) { existing.drinkItem = null; }
+      else {
+        const item = menu.items.find(i => i.id === drinkItemId && i.category === 'drink');
+        if (!item) return res.status(400).json({ error: 'Boisson introuvable dans le menu' });
+        existing.drinkItem = { id: item.id, name: item.name, price: item.price };
+      }
+    }
+    if (!existing.foodItem && !existing.drinkItem)
+      return res.status(400).json({ error: 'Sélectionnez au moins un plat ou une boisson' });
+    existing.updatedAt = new Date().toISOString();
+    write('choices', choices);
+    sseNotify(existing.restaurantId, 'update_choice', { choice: existing });
+    return res.json(existing);
   }
 
-  const now        = new Date().toISOString();
-  const choiceData = {
-    id:            existingIdx >= 0 ? choices[existingIdx].id : Date.now().toString(),
-    userId:        req.user.id,
-    userName:      req.user.fullName,
-    enterpriseId:  req.user.enterpriseId,
-    food,
-    customFood:    food === 'Autres' ? customFood : null,
-    date:          today,
+  const menu = read('menus').find(m => m.restaurantId === restaurantId) || { items: [] };
+  let foodItem = null, drinkItem = null;
+
+  if (foodItemId) {
+    const item = menu.items.find(i => i.id === foodItemId && i.category === 'food');
+    if (!item) return res.status(400).json({ error: 'Plat introuvable dans le menu' });
+    foodItem = { id: item.id, name: item.name, price: item.price };
+  }
+  if (drinkItemId) {
+    const item = menu.items.find(i => i.id === drinkItemId && i.category === 'drink');
+    if (!item) return res.status(400).json({ error: 'Boisson introuvable dans le menu' });
+    drinkItem = { id: item.id, name: item.name, price: item.price };
+  }
+
+  const restaurant = read('restaurants').find(r => r.id === restaurantId);
+  const choice = {
+    id: uid(),
+    userId: req.user.id,
+    userName: req.user.fullName,
+    enterpriseId: req.user.enterpriseId,
+    enterpriseName: req.user.enterpriseName,
+    restaurantId,
+    restaurantName: restaurant?.restaurantName || '',
+    foodItem,
+    drinkItem,
+    date: t,
+    rating: null,
     orderLaunched: false,
-    createdAt:     existingIdx >= 0 ? choices[existingIdx].createdAt : now,
-    updatedAt:     now,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
 
-  if (existingIdx >= 0) choices[existingIdx] = choiceData;
-  else choices.push(choiceData);
+  choices.push(choice);
+  write('choices', choices);
+  sseNotify(restaurantId, 'new_choice', { choice });
 
-  await writeDB(KEYS.choices, choices);
-  res.json(choiceData);
+  res.status(201).json(choice);
 });
 
-app.delete('/api/choices/mine', auth, async (req, res) => {
-  let choices = await readDB(KEYS.choices);
-  const today = todayStr();
-  const idx   = choices.findIndex(c => c.userId === req.user.id && c.date === today);
+// Modifier un choix (5 minutes)
+app.put('/api/choices/:id', auth, requireRole('employee'), (req, res) => {
+  const choices = read('choices');
+  const idx = choices.findIndex(c => c.id === req.params.id && c.userId === req.user.id);
+  if (idx === -1) return res.status(404).json({ error: 'Choix introuvable' });
 
-  if (idx === -1) return res.status(404).json({ error: 'Aucun choix trouvé' });
-  if (choices[idx].orderLaunched)
-    return res.status(403).json({ error: 'La commande a déjà été lancée' });
+  const choice = choices[idx];
+  const elapsed = (Date.now() - new Date(choice.createdAt).getTime()) / 60000;
+  if (elapsed > LOCK_MIN) return res.status(403).json({ error: `Délai de modification dépassé (${LOCK_MIN} min)` });
+  if (choice.orderLaunched) return res.status(403).json({ error: 'La commande a déjà été lancée' });
 
-  const elapsed = Date.now() - new Date(choices[idx].updatedAt).getTime();
-  if (elapsed > LOCK_MS)
-    return res.status(403).json({ error: 'Le délai de 5 minutes est expiré.', locked: true });
+  const { foodItemId, drinkItemId } = req.body;
+  const menu = read('menus').find(m => m.restaurantId === choice.restaurantId) || { items: [] };
 
-  choices.splice(idx, 1);
-  await writeDB(KEYS.choices, choices);
+  if (foodItemId !== undefined) {
+    if (foodItemId === null) {
+      choice.foodItem = null;
+    } else {
+      const item = menu.items.find(i => i.id === foodItemId && i.category === 'food');
+      if (!item) return res.status(400).json({ error: 'Plat introuvable' });
+      choice.foodItem = { id: item.id, name: item.name, price: item.price };
+    }
+  }
+  if (drinkItemId !== undefined) {
+    if (drinkItemId === null) {
+      choice.drinkItem = null;
+    } else {
+      const item = menu.items.find(i => i.id === drinkItemId && i.category === 'drink');
+      if (!item) return res.status(400).json({ error: 'Boisson introuvable' });
+      choice.drinkItem = { id: item.id, name: item.name, price: item.price };
+    }
+  }
+  if (!choice.foodItem && !choice.drinkItem)
+    return res.status(400).json({ error: 'Le choix doit contenir au moins un plat ou une boisson' });
+
+  choice.updatedAt = new Date().toISOString();
+
+  write('choices', choices);
+  res.json(choice);
+});
+
+// Vider le cache historique (employé — hors aujourd'hui) — AVANT /:id
+app.delete('/api/choices/history', auth, requireRole('employee'), (req, res) => {
+  const t = todayStr();
+  write('choices', read('choices').filter(c => !(c.userId === req.user.id && c.date !== t)));
   res.json({ success: true });
 });
 
-app.post('/api/choices/launch', auth, async (req, res) => {
-  if (req.user.role !== 'enterprise')
-    return res.status(403).json({ error: "Seule l'entreprise peut lancer la commande" });
+// Supprimer un choix (5 minutes)
+app.delete('/api/choices/:id', auth, requireRole('employee'), (req, res) => {
+  const choices = read('choices');
+  const choice = choices.find(c => c.id === req.params.id && c.userId === req.user.id);
+  if (!choice) return res.status(404).json({ error: 'Choix introuvable' });
 
-  let choices = await readDB(KEYS.choices);
-  const today = todayStr();
-  let count   = 0;
+  const elapsed = (Date.now() - new Date(choice.createdAt).getTime()) / 60000;
+  if (elapsed > LOCK_MIN) return res.status(403).json({ error: `Délai de suppression dépassé (${LOCK_MIN} min)` });
+  if (choice.orderLaunched) return res.status(403).json({ error: 'La commande a déjà été lancée' });
 
-  choices = choices.map(c => {
-    if (c.date === today && c.enterpriseId === req.user.id) {
-      count++;
+  write('choices', choices.filter(c => c.id !== req.params.id));
+  res.json({ success: true });
+});
+
+// Mon choix aujourd'hui
+app.get('/api/choices/mine', auth, requireRole('employee'), (req, res) => {
+  const t = todayStr();
+  const choice = read('choices').find(c => c.userId === req.user.id && c.date === t) || null;
+  res.json(choice);
+});
+
+// Choix du jour (filtré par rôle)
+app.get('/api/choices/today', auth, (req, res) => {
+  const t = todayStr();
+  let choices = read('choices').filter(c => c.date === t);
+  if (req.user.role === 'employee')     choices = choices.filter(c => c.userId === req.user.id);
+  else if (req.user.role === 'enterprise') choices = choices.filter(c => c.enterpriseId === req.user.id);
+  else if (req.user.role === 'restauratrice') choices = choices.filter(c => c.restaurantId === req.user.id);
+  res.json(choices);
+});
+
+// Noter un plat (1-5 étoiles)
+app.post('/api/choices/:id/rate', auth, requireRole('employee'), (req, res) => {
+  const { stars } = req.body;
+  const s = Number(stars);
+  if (!s || s < 1 || s > 5) return res.status(400).json({ error: 'Note invalide (1 à 5 étoiles)' });
+
+  const choices = read('choices');
+  const idx = choices.findIndex(c => c.id === req.params.id && c.userId === req.user.id);
+  if (idx === -1) return res.status(404).json({ error: 'Choix introuvable' });
+
+  choices[idx].rating = s;
+  write('choices', choices);
+
+  const choice = choices[idx];
+  const ratings = read('ratings');
+  ratings.push({
+    id: uid(),
+    employeeId:     req.user.id,
+    employeeName:   req.user.fullName,
+    enterpriseId:   req.user.enterpriseId,
+    enterpriseName: req.user.enterpriseName,
+    restaurantId:   choice.restaurantId,
+    restaurantName: choice.restaurantName,
+    itemId:         choice.foodItem?.id,
+    itemName:       choice.foodItem?.name,
+    stars: s, date: choice.date,
+    createdAt: new Date().toISOString(),
+  });
+  write('ratings', ratings);
+
+  const starEmoji = '⭐'.repeat(s);
+  pushNotif(choice.restaurantId, 'restauratrice', 'new_rating', 'Nouvelle évaluation',
+    `${req.user.fullName} de ${req.user.enterpriseName} vous a noté ${starEmoji} pour "${choice.foodItem?.name || 'votre service'}".`,
+    { stars: s, employeeId: req.user.id, enterpriseId: req.user.enterpriseId });
+
+  res.json(choices[idx]);
+});
+
+// Historique des choix
+app.get('/api/choices/history', auth, (req, res) => {
+  let choices = read('choices');
+  if (req.user.role === 'employee')      choices = choices.filter(c => c.userId === req.user.id);
+  else if (req.user.role === 'enterprise') choices = choices.filter(c => c.enterpriseId === req.user.id);
+  else if (req.user.role === 'restauratrice') choices = choices.filter(c => c.restaurantId === req.user.id);
+  res.json(choices.sort((a, b) => new Date(b.date) - new Date(a.date)));
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMMANDES (ORDERS)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Soumettre une commande
+app.post('/api/orders', auth, requireRole('enterprise'), (req, res) => {
+  const { restaurantId, paymentMode, depositScreenshot, depositType } = req.body;
+  if (!restaurantId || !paymentMode) return res.status(400).json({ error: 'Restaurant et mode de paiement requis' });
+  if (!['delivery', 'upfront'].includes(paymentMode)) return res.status(400).json({ error: 'Mode de paiement invalide' });
+
+  const t = todayStr();
+  const todayChoices = read('choices').filter(c =>
+    c.enterpriseId === req.user.id && c.restaurantId === restaurantId && c.date === t && !c.orderLaunched
+  );
+  if (!todayChoices.length) return res.status(400).json({ error: 'Aucun choix non soumis pour ce restaurant aujourd\'hui' });
+
+  const restaurant = read('restaurants').find(r => r.id === restaurantId);
+  let totalAmount = 0;
+  const items = todayChoices.map(c => {
+    const amount = (c.foodItem?.price || 0) + (c.drinkItem?.price || 0);
+    totalAmount += amount;
+    return { employeeId: c.userId, employeeName: c.userName, foodItem: c.foodItem, drinkItem: c.drinkItem, amount };
+  });
+
+  const order = {
+    id: uid(),
+    enterpriseId:   req.user.id,
+    enterpriseName: req.user.companyName,
+    restaurantId,
+    restaurantName: restaurant?.restaurantName || '',
+    date: t, items, totalAmount,
+    paymentMode,
+    depositScreenshot: paymentMode === 'upfront' ? (depositScreenshot || null) : null,
+    depositType: paymentMode === 'upfront' ? (depositType || null) : null,
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+  };
+
+  const orders = read('orders');
+  orders.push(order);
+  write('orders', orders);
+
+  // Verrouiller les choix
+  const allChoices = read('choices').map(c => {
+    if (c.enterpriseId === req.user.id && c.restaurantId === restaurantId && c.date === t)
       return { ...c, orderLaunched: true };
-    }
     return c;
   });
+  write('choices', allChoices);
 
-  if (count === 0)
-    return res.status(400).json({ error: "Aucun choix pour aujourd'hui" });
+  pushNotif(restaurantId, 'restauratrice', 'new_order', 'Nouvelle commande',
+    `${req.user.companyName} vient de passer une commande de ${items.length} repas. Total: ${totalAmount.toLocaleString('fr-FR')} FCFA.`,
+    { orderId: order.id, enterpriseId: req.user.id });
 
-  await writeDB(KEYS.choices, choices);
-  res.json({ success: true, count });
+  // Ne pas renvoyer le screenshot dans la réponse (accessible uniquement par admin)
+  const { depositScreenshot: _ds, ...orderSafe } = order;
+  res.status(201).json(orderSafe);
 });
 
-app.get('/api/history', auth, async (req, res) => {
-  const all = await readDB(KEYS.choices);
-  const history = all
-    .filter(c => c.userId === req.user.id)
-    .sort((a, b) => b.date.localeCompare(a.date));
-  res.json(history);
+// Lister les commandes (sans screenshot)
+app.get('/api/orders', auth, (req, res) => {
+  let orders = read('orders');
+  if (req.user.role === 'enterprise')   orders = orders.filter(o => o.enterpriseId === req.user.id);
+  else if (req.user.role === 'restauratrice') orders = orders.filter(o => o.restaurantId === req.user.id);
+  res.json(orders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .map(({ depositScreenshot, ...o }) => o));
 });
 
-// ════════════════════════════════════════════════════════════════════
-// SSE — NOTIFICATIONS TEMPS RÉEL
-// ════════════════════════════════════════════════════════════════════
+// Mettre à jour le statut d'une commande (restaurant)
+app.put('/api/orders/:id/status', auth, requireRole('restauratrice'), (req, res) => {
+  const { status } = req.body;
+  if (!['confirmed', 'preparing', 'delivered', 'cancelled'].includes(status))
+    return res.status(400).json({ error: 'Statut invalide' });
 
-app.get('/api/events', authSSE, (req, res) => {
-  if (!['enterprise', 'restauratrice'].includes(req.user.role))
-    return res.status(403).end();
+  const orders = read('orders');
+  const idx = orders.findIndex(o => o.id === req.params.id && o.restaurantId === req.user.id);
+  if (idx === -1) return res.status(404).json({ error: 'Commande introuvable' });
 
-  res.setHeader('Content-Type',  'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection',    'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
+  orders[idx].status = status;
+  orders[idx].updatedAt = new Date().toISOString();
+  write('orders', orders);
 
-  const uid = req.user.id;
-  if (!sseClients.has(uid)) sseClients.set(uid, []);
-  sseClients.get(uid).push(res);
+  const labels = { confirmed: 'confirmée', preparing: 'en préparation', delivered: 'livrée', cancelled: 'annulée' };
+  pushNotif(orders[idx].enterpriseId, 'enterprise', 'order_status', 'Statut de commande',
+    `Votre commande chez ${req.user.restaurantName} est ${labels[status]}.`,
+    { orderId: req.params.id, status });
 
-  // Confirmation de connexion
-  res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+  res.json(orders[idx]);
+});
 
-  // Ping toutes les 25 s pour maintenir la connexion
-  const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch {} }, 25000);
+// ─────────────────────────────────────────────────────────────────────────────
+// ABONNEMENTS
+// ─────────────────────────────────────────────────────────────────────────────
 
-  req.on('close', () => {
-    clearInterval(ping);
-    const list = sseClients.get(uid) || [];
-    sseClients.set(uid, list.filter(c => c !== res));
+app.post('/api/subscriptions', auth, requireRole('enterprise'), (req, res) => {
+  const { restaurantId, frequency } = req.body;
+  const valid = ['weekly', 'monthly', 'quarterly', 'semi-annual', 'annual'];
+  if (!restaurantId || !valid.includes(frequency))
+    return res.status(400).json({ error: 'Restaurant et fréquence valide requis' });
+
+  const subs = read('subscriptions');
+  if (subs.find(s => s.enterpriseId === req.user.id && s.restaurantId === restaurantId && s.status === 'pending'))
+    return res.status(409).json({ error: 'Une demande est déjà en attente' });
+
+  const restaurant = read('restaurants').find(r => r.id === restaurantId);
+  const sub = {
+    id: uid(),
+    enterpriseId: req.user.id, enterpriseName: req.user.companyName,
+    restaurantId, restaurantName: restaurant?.restaurantName || '',
+    frequency, status: 'pending',
+    createdAt: new Date().toISOString(),
+  };
+  subs.push(sub);
+  write('subscriptions', subs);
+
+  const labels = { weekly: 'hebdomadaire', monthly: 'mensuel', quarterly: 'trimestriel', 'semi-annual': 'semestriel', annual: 'annuel' };
+  pushNotif(restaurantId, 'restauratrice', 'subscription_request', 'Demande d\'abonnement',
+    `${req.user.companyName} demande un abonnement ${labels[frequency]}.`,
+    { subscriptionId: sub.id });
+
+  res.status(201).json(sub);
+});
+
+app.put('/api/subscriptions/:id', auth, requireRole('restauratrice'), (req, res) => {
+  const { status } = req.body;
+  if (!['accepted', 'declined'].includes(status)) return res.status(400).json({ error: 'Statut invalide' });
+
+  const subs = read('subscriptions');
+  const idx = subs.findIndex(s => s.id === req.params.id && s.restaurantId === req.user.id);
+  if (idx === -1) return res.status(404).json({ error: 'Abonnement introuvable' });
+
+  subs[idx].status = status;
+  subs[idx].updatedAt = new Date().toISOString();
+  write('subscriptions', subs);
+
+  const label = status === 'accepted' ? 'accepté' : 'décliné';
+  pushNotif(subs[idx].enterpriseId, 'enterprise', 'subscription_response', 'Réponse à votre demande',
+    `${req.user.restaurantName} a ${label} votre demande d'abonnement.`,
+    { subscriptionId: req.params.id, status });
+
+  res.json(subs[idx]);
+});
+
+app.get('/api/subscriptions', auth, (req, res) => {
+  let subs = read('subscriptions');
+  if (req.user.role === 'enterprise')   subs = subs.filter(s => s.enterpriseId === req.user.id);
+  else if (req.user.role === 'restauratrice') subs = subs.filter(s => s.restaurantId === req.user.id);
+  res.json(subs.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NOTIFICATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.get('/api/notifications', auth, (req, res) => {
+  const notifs = read('notifications')
+    .filter(n => n.userId === req.user.id)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json(notifs);
+});
+
+app.put('/api/notifications/read-all', auth, (req, res) => {
+  const notifs = read('notifications').map(n => n.userId === req.user.id ? { ...n, read: true } : n);
+  write('notifications', notifs);
+  res.json({ success: true });
+});
+
+app.put('/api/notifications/:id/read', auth, (req, res) => {
+  const notifs = read('notifications');
+  const idx = notifs.findIndex(n => n.id === req.params.id && n.userId === req.user.id);
+  if (idx === -1) return res.status(404).json({ error: 'Notification introuvable' });
+  notifs[idx].read = true;
+  write('notifications', notifs);
+  res.json(notifs[idx]);
+});
+
+app.delete('/api/notifications/:id', auth, (req, res) => {
+  write('notifications', read('notifications').filter(n => !(n.id === req.params.id && n.userId === req.user.id)));
+  res.json({ success: true });
+});
+
+app.delete('/api/notifications', auth, (req, res) => {
+  write('notifications', read('notifications').filter(n => n.userId !== req.user.id));
+  res.json({ success: true });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STATISTIQUES
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Stats entreprise
+app.get('/api/stats/enterprise', auth, requireRole('enterprise'), (req, res) => {
+  const { frequency } = req.query;
+  const start = getStartDate(frequency);
+
+  const choices = read('choices').filter(c => c.enterpriseId === req.user.id && new Date(c.date) >= start);
+  const orders  = read('orders').filter(o => o.enterpriseId === req.user.id && new Date(o.createdAt) >= start);
+
+  const foodCounts = {}, drinkCounts = {};
+  choices.forEach(c => {
+    if (c.foodItem)  foodCounts[c.foodItem.name]  = (foodCounts[c.foodItem.name]  || 0) + 1;
+    if (c.drinkItem) drinkCounts[c.drinkItem.name] = (drinkCounts[c.drinkItem.name] || 0) + 1;
+  });
+
+  const totalBudget = orders.reduce((s, o) => s + (o.totalAmount || 0), 0);
+
+  const employees = read('employees').filter(e => e.enterpriseId === req.user.id);
+  const employeeStats = employees.map(({ password, ...e }) => ({
+    ...e, choicesCount: choices.filter(c => c.userId === e.id).length,
+  }));
+
+  res.json({ totalChoices: choices.length, totalBudget, foodCounts, drinkCounts, employeeStats, period: { frequency } });
+});
+
+// Stats restaurant
+app.get('/api/stats/restaurant', auth, requireRole('restauratrice'), (req, res) => {
+  const { frequency } = req.query;
+  const start = getStartDate(frequency);
+
+  const orders  = read('orders').filter(o => o.restaurantId === req.user.id && new Date(o.createdAt) >= start);
+  const ratings = read('ratings').filter(r => r.restaurantId === req.user.id && new Date(r.createdAt) >= start);
+
+  const totalRevenue = orders.reduce((s, o) => s + (o.totalAmount || 0), 0);
+
+  const itemCounts = {};
+  orders.forEach(order => {
+    (order.items || []).forEach(item => {
+      if (item.foodItem)  itemCounts[item.foodItem.name]  = (itemCounts[item.foodItem.name]  || 0) + 1;
+      if (item.drinkItem) itemCounts[item.drinkItem.name] = (itemCounts[item.drinkItem.name] || 0) + 1;
+    });
+  });
+
+  const paymentMethods = {};
+  orders.forEach(o => { paymentMethods[o.paymentMode] = (paymentMethods[o.paymentMode] || 0) + 1; });
+
+  const avgRating = ratings.length ? ratings.reduce((s, r) => s + r.stars, 0) / ratings.length : 0;
+
+  res.json({
+    totalOrders: orders.length, totalRevenue,
+    itemCounts, paymentMethods,
+    avgRating: Math.round(avgRating * 10) / 10,
+    ratingCount: ratings.length,
+    period: { frequency },
   });
 });
 
-// ════════════════════════════════════════════════════════════════════
-// MESSAGERIE
-// ════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN
+// ─────────────────────────────────────────────────────────────────────────────
 
-app.get('/api/messages', auth, async (req, res) => {
-  if (!['enterprise', 'restauratrice'].includes(req.user.role))
-    return res.status(403).json({ error: 'Accès refusé' });
-  // audioData exclu de la liste (trop lourd) → récupéré séparément
-  const messages = (await readDB(KEYS.messages))
-    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
-    .map(({ audioData, ...m }) => m);
-  res.json(messages);
+app.get('/api/admin/enterprises', auth, requireRole('superadmin'), (req, res) => {
+  res.json(read('enterprises').map(({ password, ...e }) => e));
 });
 
-// Récupère l'audio d'un message spécifique
-app.get('/api/messages/:id/audio', auth, async (req, res) => {
+app.get('/api/admin/restaurants', auth, requireRole('superadmin'), (req, res) => {
+  res.json(read('restaurants').map(({ password, ...r }) => r));
+});
+
+app.get('/api/admin/employees', auth, requireRole('superadmin'), (req, res) => {
+  res.json(read('employees').map(({ password, ...e }) => e));
+});
+
+app.get('/api/admin/stats', auth, requireRole('superadmin'), (req, res) => {
+  const { frequency } = req.query;
+  const start = getStartDate(frequency);
+
+  const enterprises = read('enterprises');
+  const restaurants = read('restaurants');
+  const employees   = read('employees');
+  const choices     = read('choices').filter(c => new Date(c.date) >= start);
+  // Admin does NOT see deposit screenshots
+  const orders = read('orders')
+    .filter(o => new Date(o.createdAt) >= start)
+    .map(({ depositScreenshot, ...o }) => o);
+
+  const maleCount   = employees.filter(e => e.gender === 'male').length;
+  const femaleCount = employees.filter(e => e.gender === 'female').length;
+
+  const foodCounts = {};
+  choices.forEach(c => {
+    if (c.foodItem)  foodCounts[c.foodItem.name]  = (foodCounts[c.foodItem.name]  || 0) + 1;
+    if (c.drinkItem) foodCounts[c.drinkItem.name] = (foodCounts[c.drinkItem.name] || 0) + 1;
+  });
+
+  const paymentMethods = {};
+  orders.forEach(o => { paymentMethods[o.paymentMode] = (paymentMethods[o.paymentMode] || 0) + 1; });
+
+  const totalMobilized = orders.reduce((s, o) => s + (o.totalAmount || 0), 0);
+
+  const restaurantRevenue = {};
+  orders.forEach(o => { restaurantRevenue[o.restaurantName] = (restaurantRevenue[o.restaurantName] || 0) + (o.totalAmount || 0); });
+
+  const enterpriseBudget = {};
+  orders.forEach(o => { enterpriseBudget[o.enterpriseName] = (enterpriseBudget[o.enterpriseName] || 0) + (o.totalAmount || 0); });
+
+  res.json({
+    counts: { enterprises: enterprises.length, restaurants: restaurants.length, employees: employees.length },
+    gender: { male: maleCount, female: femaleCount },
+    foodCounts, paymentMethods, totalMobilized,
+    restaurantRevenue, enterpriseBudget,
+    period: { frequency },
+  });
+});
+
+// Commandes avec screenshot (admin uniquement)
+app.get('/api/admin/orders', auth, requireRole('superadmin'), (req, res) => {
+  res.json(read('orders').sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
+});
+
+// Screenshot d'un dépôt spécifique (admin uniquement)
+app.get('/api/admin/orders/:id/screenshot', auth, requireRole('superadmin'), (req, res) => {
+  const order = read('orders').find(o => o.id === req.params.id);
+  if (!order) return res.status(404).json({ error: 'Commande introuvable' });
+  if (!order.depositScreenshot)
+    return res.status(404).json({ error: 'Aucun screenshot pour cette commande' });
+  res.json({ depositScreenshot: order.depositScreenshot, depositType: order.depositType });
+});
+
+app.get('/api/admin/deletion-requests', auth, requireRole('superadmin'), (req, res) => {
+  res.json(read('deletionRequests').sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt)));
+});
+
+app.delete('/api/admin/users/:type/:id', auth, requireRole('superadmin'), (req, res) => {
+  const { type, id } = req.params;
+  if (type === 'enterprise') {
+    write('enterprises', read('enterprises').filter(e => e.id !== id));
+    write('employees', read('employees').filter(e => e.enterpriseId !== id));
+    write('affiliations', read('affiliations').filter(a => a.enterpriseId !== id));
+  } else if (type === 'restaurant') {
+    write('restaurants', read('restaurants').filter(r => r.id !== id));
+    write('affiliations', read('affiliations').filter(a => a.restaurantId !== id));
+  } else if (type === 'employee') {
+    write('employees', read('employees').filter(e => e.id !== id));
+  } else {
+    return res.status(400).json({ error: 'Type invalide' });
+  }
+  res.json({ success: true });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SUPPRESSION DE COMPTE
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.delete('/api/account', auth, async (req, res) => {
   if (!['enterprise', 'restauratrice'].includes(req.user.role))
+    return res.status(403).json({ error: 'Seules les entreprises et restaurants peuvent supprimer leur compte' });
+
+  const { reason, feedback, badExperience, password } = req.body;
+  if (!password) return res.status(400).json({ error: 'Mot de passe requis' });
+
+  let user, type;
+  if (req.user.role === 'enterprise') {
+    user = read('enterprises').find(e => e.id === req.user.id);
+    type = 'enterprise';
+  } else {
+    user = read('restaurants').find(r => r.id === req.user.id);
+    type = 'restaurant';
+  }
+
+  if (!user) return res.status(404).json({ error: 'Compte introuvable' });
+
+  const valid = await bcrypt.compare(password, user.password);
+  if (!valid) return res.status(400).json({ error: 'Mot de passe incorrect' });
+
+  const reqs = read('deletionRequests');
+  reqs.push({
+    id: uid(),
+    userId: req.user.id,
+    userType: type,
+    userName: user.companyName || user.restaurantName || '',
+    email: user.email,
+    reason: reason || '',
+    feedback: feedback || '',
+    badExperience: badExperience || '',
+    deletedAt: new Date().toISOString(),
+  });
+  write('deletionRequests', reqs);
+
+  if (type === 'enterprise') {
+    write('enterprises', read('enterprises').filter(e => e.id !== req.user.id));
+    write('employees', read('employees').filter(e => e.enterpriseId !== req.user.id));
+    write('affiliations', read('affiliations').filter(a => a.enterpriseId !== req.user.id));
+  } else {
+    write('restaurants', read('restaurants').filter(r => r.id !== req.user.id));
+    write('affiliations', read('affiliations').filter(a => a.restaurantId !== req.user.id));
+  }
+
+  res.json({ success: true, message: 'Votre compte a été supprimé avec succès.' });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MESSAGERIE — entreprise ↔ restaurant
+// ─────────────────────────────────────────────────────────────────────────────
+// Modèle message :
+//   { id, senderId, senderName, senderRole,
+//     recipientId, recipientName, recipientRole,
+//     type: 'text'|'audio',
+//     content,          // texte ou null
+//     audioData,        // base64 complet — omis dans la liste, chargé à la demande
+//     audioDuration,    // secondes (optionnel)
+//     readBy: [userId],
+//     timestamp }
+
+const MAX_AUDIO_MB = 10;
+const MAX_AUDIO_BYTES = MAX_AUDIO_MB * 1024 * 1024;
+
+// Qui peut parler à qui : entreprise ↔ restaurant affiliés
+function canMessage(req, otherId) {
+  const affiliations = read('affiliations');
+  if (req.user.role === 'enterprise') {
+    return affiliations.some(a => a.enterpriseId === req.user.id && a.restaurantId === otherId);
+  }
+  if (req.user.role === 'restauratrice') {
+    return affiliations.some(a => a.restaurantId === req.user.id && a.enterpriseId === otherId);
+  }
+  return false;
+}
+
+function resolveDisplayName(id, role) {
+  if (role === 'enterprise') {
+    const e = read('enterprises').find(e => e.id === id);
+    return e ? e.companyName : 'Entreprise';
+  }
+  if (role === 'restauratrice') {
+    const r = read('restaurants').find(r => r.id === id);
+    return r ? r.restaurantName : 'Restaurant';
+  }
+  return 'Inconnu';
+}
+
+// Liste des conversations (interlocuteurs uniques)
+app.get('/api/messages/conversations', auth, requireRole('enterprise', 'restauratrice'), (req, res) => {
+  const msgs = read('messages').sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  const seen = new Map();
+  msgs.forEach(m => {
+    if (m.senderId === req.user.id || m.recipientId === req.user.id) {
+      const otherId   = m.senderId === req.user.id ? m.recipientId : m.senderId;
+      const otherRole = m.senderId === req.user.id ? m.recipientRole : m.senderRole;
+      if (!seen.has(otherId)) {
+        const unread = msgs.filter(x =>
+          x.recipientId === req.user.id && x.senderId === otherId &&
+          !x.readBy.includes(req.user.id)
+        ).length;
+        seen.set(otherId, {
+          id: otherId,
+          role: otherRole,
+          name: resolveDisplayName(otherId, otherRole),
+          lastMessage: m.type === 'text' ? m.content : '🎵 Message audio',
+          lastTimestamp: m.timestamp,
+          unread,
+        });
+      }
+    }
+  });
+  res.json([...seen.values()].sort((a, b) => new Date(b.lastTimestamp) - new Date(a.lastTimestamp)));
+});
+
+// Historique d'une conversation
+app.get('/api/messages', auth, requireRole('enterprise', 'restauratrice'), (req, res) => {
+  const { withId } = req.query;
+  if (!withId) return res.status(400).json({ error: 'Paramètre withId requis' });
+
+  const msgs = read('messages')
+    .filter(m =>
+      (m.senderId === req.user.id && m.recipientId === withId) ||
+      (m.senderId === withId && m.recipientId === req.user.id)
+    )
+    .map(({ audioData, ...m }) => m) // audioData chargé à la demande
+    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+  res.json(msgs);
+});
+
+// Charger l'audio d'un message (lazy)
+app.get('/api/messages/:id/audio', auth, requireRole('enterprise', 'restauratrice'), (req, res) => {
+  const msg = read('messages').find(m => m.id === req.params.id);
+  if (!msg) return res.status(404).json({ error: 'Message introuvable' });
+  if (msg.type !== 'audio') return res.status(400).json({ error: 'Pas un message audio' });
+  if (msg.senderId !== req.user.id && msg.recipientId !== req.user.id)
     return res.status(403).json({ error: 'Accès refusé' });
-  const messages = await readDB(KEYS.messages);
-  const msg = messages.find(m => m.id === req.params.id);
-  if (!msg || msg.type !== 'audio' || !msg.audioData)
-    return res.status(404).json({ error: 'Audio non trouvé' });
   res.json({ audioData: msg.audioData });
 });
 
-app.post('/api/messages', auth, async (req, res) => {
-  if (!['enterprise', 'restauratrice'].includes(req.user.role))
-    return res.status(403).json({ error: 'Accès refusé' });
+// Envoyer un message (texte ou audio)
+app.post('/api/messages', auth, requireRole('enterprise', 'restauratrice'), (req, res) => {
+  const { recipientId, type, content, audioData, audioDuration } = req.body;
+  if (!recipientId) return res.status(400).json({ error: 'Destinataire requis' });
+  if (!['text', 'audio'].includes(type)) return res.status(400).json({ error: 'Type invalide (text|audio)' });
+  if (type === 'text' && !content?.trim()) return res.status(400).json({ error: 'Contenu requis' });
+  if (type === 'audio' && !audioData) return res.status(400).json({ error: 'Données audio requises' });
 
-  const { content, type, audioData } = req.body;
+  // Vérifier affiliation
+  if (!canMessage(req, recipientId))
+    return res.status(403).json({ error: 'Vous n\'êtes pas affilié à cet interlocuteur' });
 
-  // Validation selon le type
+  // Taille audio max
   if (type === 'audio') {
-    if (!audioData) return res.status(400).json({ error: 'Données audio manquantes' });
-    if (audioData.length > 6 * 1024 * 1024)
-      return res.status(400).json({ error: 'Audio trop long (2 min max)' });
-  } else {
-    if (!content?.trim()) return res.status(400).json({ error: 'Le message ne peut pas être vide' });
+    const base64Data = audioData.includes(',') ? audioData.split(',')[1] : audioData;
+    const bytes = Buffer.byteLength(base64Data, 'base64');
+    if (bytes > MAX_AUDIO_BYTES)
+      return res.status(413).json({ error: `Audio trop lourd (max ${MAX_AUDIO_MB} Mo)` });
   }
 
-  const messages = await readDB(KEYS.messages);
+  // Déterminer le rôle destinataire
+  let recipientRole, recipientName;
+  const ent = read('enterprises').find(e => e.id === recipientId);
+  const rst = read('restaurants').find(r => r.id === recipientId);
+  if (ent)      { recipientRole = 'enterprise';   recipientName = ent.companyName; }
+  else if (rst) { recipientRole = 'restauratrice'; recipientName = rst.restaurantName; }
+  else return res.status(404).json({ error: 'Destinataire introuvable' });
+
+  const senderName = resolveDisplayName(req.user.id, req.user.role);
+
   const msg = {
-    id:         Date.now().toString(),
-    senderId:   req.user.id,
-    senderName: req.user.fullName,
-    senderRole: req.user.role,
-    type:       type === 'audio' ? 'audio' : 'text',
-    content:    type === 'audio' ? '🎤 Message vocal' : content.trim(),
-    audioData:  type === 'audio' ? audioData : null,
-    timestamp:  new Date().toISOString(),
-    readBy:     [req.user.id],
+    id: uid(),
+    senderId:      req.user.id,
+    senderName,
+    senderRole:    req.user.role,
+    recipientId,
+    recipientName,
+    recipientRole,
+    type,
+    content:       type === 'text' ? content.trim() : null,
+    audioData:     type === 'audio' ? audioData : null,
+    audioDuration: audioDuration || null,
+    readBy:        [req.user.id],
+    timestamp:     new Date().toISOString(),
   };
 
+  const messages = read('messages');
   messages.push(msg);
-  await writeDB(KEYS.messages, messages);
+  write('messages', messages);
 
-  // ── Notification SSE au destinataire ──────────────────────────
-  const notifPayload = { type: 'new_message', message: { ...msg, audioData: null } };
-  const restauratrices = await readDB(KEYS.restauratrices);
+  // Notif SSE temps réel + notification persistante
+  const { audioData: _, ...msgSafe } = msg;
+  sseNotify(recipientId, 'new_message', msgSafe);
+  pushNotif(recipientId, recipientRole, 'new_message', `Nouveau message de ${senderName}`,
+    type === 'text' ? content.trim() : '🎵 Vous avez reçu un message audio.',
+    { messageId: msg.id, senderId: req.user.id });
 
-  if (req.user.role === 'enterprise') {
-    // Notifie les restauratrices liées à cette entreprise
-    restauratrices
-      .filter(r => r.enterpriseId === req.user.id)
-      .forEach(r => pushSSE(r.id, notifPayload));
-  } else if (req.user.role === 'restauratrice' && req.user.enterpriseId) {
-    // Notifie l'entreprise liée
-    pushSSE(req.user.enterpriseId, notifPayload);
-  }
-
-  res.status(201).json({ ...msg, audioData: null });
+  res.status(201).json(msgSafe);
 });
 
-app.post('/api/messages/read', auth, async (req, res) => {
-  if (!['enterprise', 'restauratrice'].includes(req.user.role))
-    return res.status(403).json({ error: 'Accès refusé' });
-  let messages = await readDB(KEYS.messages);
-  messages = messages.map(m => ({
-    ...m,
-    readBy: m.readBy.includes(req.user.id) ? m.readBy : [...m.readBy, req.user.id],
-  }));
-  await writeDB(KEYS.messages, messages);
+// Marquer des messages comme lus
+app.post('/api/messages/read', auth, requireRole('enterprise', 'restauratrice'), (req, res) => {
+  const { withId } = req.body;
+  if (!withId) return res.status(400).json({ error: 'withId requis' });
+  const messages = read('messages').map(m => {
+    if (m.senderId === withId && m.recipientId === req.user.id && !m.readBy.includes(req.user.id)) {
+      return { ...m, readBy: [...m.readBy, req.user.id] };
+    }
+    return m;
+  });
+  write('messages', messages);
   res.json({ success: true });
 });
 
-app.get('/api/messages/unread', auth, async (req, res) => {
-  if (!['enterprise', 'restauratrice'].includes(req.user.role))
-    return res.json({ count: 0 });
-  const all   = await readDB(KEYS.messages);
-  const count = all.filter(m =>
-    !m.readBy.includes(req.user.id) && m.senderId !== req.user.id
+// Nombre de messages non lus
+app.get('/api/messages/unread', auth, requireRole('enterprise', 'restauratrice'), (req, res) => {
+  const count = read('messages').filter(m =>
+    m.recipientId === req.user.id && !m.readBy.includes(req.user.id)
   ).length;
   res.json({ count });
 });
 
-// ════════════════════════════════════════════════════════════════════
-// SUPERADMIN
-// ════════════════════════════════════════════════════════════════════
-
-app.get('/api/admin/enterprises', auth, async (req, res) => {
-  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Accès refusé' });
-  const list = (await readDB(KEYS.enterprises)).map(({ password, ...e }) => e);
-  res.json(list);
-});
-
-app.get('/api/admin/employees', auth, async (req, res) => {
-  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Accès refusé' });
-  const list = (await readDB(KEYS.employees)).map(({ password, ...e }) => e);
-  res.json(list);
-});
-
-app.get('/api/admin/restauratrices', auth, async (req, res) => {
-  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Accès refusé' });
-  const list = (await readDB(KEYS.restauratrices)).map(({ password, ...r }) => r);
-  res.json(list);
-});
-
-app.get('/api/admin/choices/today', auth, async (req, res) => {
-  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Accès refusé' });
-  const choices = (await readDB(KEYS.choices)).filter(c => c.date === todayStr());
-  res.json(choices);
-});
-
-app.get('/api/admin/history', auth, async (req, res) => {
-  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Accès refusé' });
-  const history = (await readDB(KEYS.choices)).sort((a, b) => b.date.localeCompare(a.date));
-  res.json(history);
-});
-
-// ── Renommer un utilisateur ───────────────────────────────────────────────────
-app.patch('/api/admin/users/:type/:id', auth, async (req, res) => {
-  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Accès refusé' });
-
-  const { type, id } = req.params;
-  const { newName, newDomain } = req.body;
-
-  if (!newName?.trim()) return res.status(400).json({ error: 'Le nom ne peut pas être vide' });
-
-  try {
-    if (type === 'enterprise') {
-      const enterprises = await readDB(KEYS.enterprises);
-      const idx = enterprises.findIndex(e => e.id === id);
-      if (idx === -1) return res.status(404).json({ error: 'Entreprise non trouvée' });
-
-      const oldName = enterprises[idx].companyName;
-      enterprises[idx].companyName = newName.trim();
-      if (newDomain?.trim()) enterprises[idx].domain = newDomain.trim();
-      await writeDB(KEYS.enterprises, enterprises);
-
-      // Cascade : met à jour enterpriseName dans employees et restauratrices
-      const employees = await readDB(KEYS.employees);
-      const updatedEmps = employees.map(e =>
-        e.enterpriseId === id ? { ...e, enterpriseName: newName.trim() } : e
-      );
-      await writeDB(KEYS.employees, updatedEmps);
-
-      const restos = await readDB(KEYS.restauratrices);
-      const updatedRestos = restos.map(r =>
-        r.enterpriseId === id ? { ...r, enterpriseName: newName.trim() } : r
-      );
-      await writeDB(KEYS.restauratrices, updatedRestos);
-
-      return res.json({ success: true, oldName, newName: newName.trim() });
-    }
-
-    if (type === 'employee') {
-      const employees = await readDB(KEYS.employees);
-      const idx = employees.findIndex(e => e.id === id);
-      if (idx === -1) return res.status(404).json({ error: 'Employé non trouvé' });
-      employees[idx].fullName = newName.trim();
-      await writeDB(KEYS.employees, employees);
-      return res.json({ success: true });
-    }
-
-    if (type === 'restauratrice') {
-      const restos = await readDB(KEYS.restauratrices);
-      const idx = restos.findIndex(r => r.id === id);
-      if (idx === -1) return res.status(404).json({ error: 'Restauratrice non trouvée' });
-      restos[idx].fullName = newName.trim();
-      await writeDB(KEYS.restauratrices, restos);
-      return res.json({ success: true });
-    }
-
-    res.status(400).json({ error: 'Type inconnu' });
-  } catch (err) {
-    console.error('Erreur renommage admin:', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-});
-
-// ── Supprimer un utilisateur ──────────────────────────────────────────────────
-app.delete('/api/admin/users/:type/:id', auth, async (req, res) => {
-  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Accès refusé' });
-
-  const { type, id } = req.params;
-
-  try {
-    if (type === 'enterprise') {
-      let enterprises = await readDB(KEYS.enterprises);
-      if (!enterprises.find(e => e.id === id))
-        return res.status(404).json({ error: 'Entreprise non trouvée' });
-
-      // Cascade : supprime employés, restauratrices et choix liés
-      let employees = await readDB(KEYS.employees);
-      await writeDB(KEYS.employees, employees.filter(e => e.enterpriseId !== id));
-
-      let restos = await readDB(KEYS.restauratrices);
-      await writeDB(KEYS.restauratrices, restos.filter(r => r.enterpriseId !== id));
-
-      let choices = await readDB(KEYS.choices);
-      await writeDB(KEYS.choices, choices.filter(c => c.enterpriseId !== id));
-
-      await writeDB(KEYS.enterprises, enterprises.filter(e => e.id !== id));
-      return res.json({ success: true });
-    }
-
-    if (type === 'employee') {
-      let employees = await readDB(KEYS.employees);
-      if (!employees.find(e => e.id === id))
-        return res.status(404).json({ error: 'Employé non trouvé' });
-      await writeDB(KEYS.employees, employees.filter(e => e.id !== id));
-      return res.json({ success: true });
-    }
-
-    if (type === 'restauratrice') {
-      let restos = await readDB(KEYS.restauratrices);
-      if (!restos.find(r => r.id === id))
-        return res.status(404).json({ error: 'Restauratrice non trouvée' });
-      await writeDB(KEYS.restauratrices, restos.filter(r => r.id !== id));
-      return res.json({ success: true });
-    }
-
-    res.status(400).json({ error: 'Type inconnu' });
-  } catch (err) {
-    console.error('Erreur suppression admin:', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-});
-
-// ── Modifier un choix (admin) ─────────────────────────────────────────────────
-app.patch('/api/admin/choices/:id', auth, async (req, res) => {
-  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Accès refusé' });
-
-  const { food, customFood } = req.body;
-  if (!food) return res.status(400).json({ error: 'Choix de repas requis' });
-
-  let choices = await readDB(KEYS.choices);
-  const idx   = choices.findIndex(c => c.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Choix non trouvé' });
-
-  choices[idx] = {
-    ...choices[idx],
-    food,
-    customFood: food === 'Autres' ? (customFood || null) : null,
-    updatedAt:  new Date().toISOString(),
-  };
-  await writeDB(KEYS.choices, choices);
-  res.json(choices[idx]);
-});
-
-// ── Supprimer un choix (admin) ────────────────────────────────────────────────
-app.delete('/api/admin/choices/:id', auth, async (req, res) => {
-  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Accès refusé' });
-
-  let choices = await readDB(KEYS.choices);
-  if (!choices.find(c => c.id === req.params.id))
-    return res.status(404).json({ error: 'Choix non trouvé' });
-
-  await writeDB(KEYS.choices, choices.filter(c => c.id !== req.params.id));
+// Supprimer un message (expéditeur seulement)
+app.delete('/api/messages/:id', auth, requireRole('enterprise', 'restauratrice'), (req, res) => {
+  const messages = read('messages');
+  const msg = messages.find(m => m.id === req.params.id);
+  if (!msg) return res.status(404).json({ error: 'Message introuvable' });
+  if (msg.senderId !== req.user.id) return res.status(403).json({ error: 'Seul l\'expéditeur peut supprimer' });
+  write('messages', messages.filter(m => m.id !== req.params.id));
   res.json({ success: true });
 });
 
-// ════════════════════════════════════════════════════════════════════
-// DÉMARRAGE
-// ════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────────
+// TÉLÉCHARGEMENT PDF
+// ─────────────────────────────────────────────────────────────────────────────
 
-// Vercel exporte l'app (pas de app.listen)
-module.exports = app;
+function buildPDF(blocks) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 40 });
+    const chunks = [];
+    doc.on('data',  c => chunks.push(c));
+    doc.on('end',   () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
 
-// En local (npm start), écoute normalement
-if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`\n  LunchApp → http://localhost:${PORT}`);
-    console.log(`  Superadmin : ${SUPERADMIN.email}`);
-    console.log(`  Stockage   : ${IS_VERCEL ? 'Vercel KV' : 'Fichiers JSON locaux'}\n`);
+    const now = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+    doc.fontSize(18).fillColor('#F97316').text('LunchApp', { align: 'center' });
+    doc.fontSize(10).fillColor('#64748B').text(`Généré le ${now}`, { align: 'center' });
+    doc.moveDown(0.5);
+    doc.moveTo(40, doc.y).lineTo(doc.page.width - 40, doc.y).strokeColor('#E2E8F0').stroke();
+    doc.moveDown(0.5);
+
+    blocks.forEach(({ title, lines }) => {
+      doc.fontSize(13).fillColor('#1E293B').text(title);
+      doc.moveDown(0.2);
+      lines.forEach(l => doc.fontSize(10).fillColor('#334155').text(`• ${l}`));
+      doc.moveDown(0.8);
+    });
+
+    doc.end();
   });
 }
+
+function sendPDF(res, filename, buffer) {
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.setHeader('Content-Length', buffer.length);
+  res.send(buffer);
+}
+
+const PERIOD_LABELS = { daily: "Aujourd'hui", weekly: 'Cette semaine', monthly: 'Ce mois' };
+
+// ── PDF stats restaurant ───────────────────────────────────────────────────────
+app.get('/api/stats/pdf/restaurant', auth, requireRole('restauratrice'), async (req, res) => {
+  const frequency = req.query.frequency || 'monthly';
+  const start     = getStartDate(frequency);
+  const user      = req.user;
+  const orders    = read('orders').filter(o => o.restaurantId === user.id && new Date(o.createdAt) >= start);
+  const choices   = read('choices').filter(c => c.restaurantId === user.id && new Date(c.date) >= start);
+  const totalRev  = orders.reduce((s, o) => s + (o.totalAmount || 0), 0);
+  const ratings   = choices.filter(c => c.rating).map(c => c.rating);
+  const avgRating = ratings.length ? (ratings.reduce((s, r) => s + r, 0) / ratings.length).toFixed(1) : 'N/A';
+
+  const itemCounts = {};
+  choices.forEach(c => {
+    if (c.foodItem)  itemCounts[c.foodItem.name]  = (itemCounts[c.foodItem.name]  || 0) + 1;
+    if (c.drinkItem) itemCounts[c.drinkItem.name] = (itemCounts[c.drinkItem.name] || 0) + 1;
+  });
+  const topItems = Object.entries(itemCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+  const blocks = [
+    {
+      title: `Rapport ${user.restaurantName} — ${PERIOD_LABELS[frequency] || frequency}`,
+      lines: [
+        `Commandes reçues : ${orders.length}`,
+        `Revenu total : ${totalRev} FCFA`,
+        `Repas commandés : ${choices.length}`,
+        `Note moyenne : ${avgRating} / 5`,
+      ],
+    },
+    {
+      title: 'Articles les plus commandés',
+      lines: topItems.length
+        ? topItems.map(([name, cnt]) => `${name} : ${cnt} commande(s)`)
+        : ['Aucune donnée'],
+    },
+  ];
+
+  try {
+    const buf = await buildPDF(blocks);
+    sendPDF(res, `rapport-restaurant-${frequency}.pdf`, buf);
+  } catch (e) {
+    res.status(500).json({ error: 'Erreur génération PDF' });
+  }
+});
+
+// ── PDF stats entreprise ───────────────────────────────────────────────────────
+app.get('/api/stats/pdf/enterprise', auth, requireRole('enterprise'), async (req, res) => {
+  const frequency  = req.query.frequency || 'monthly';
+  const start      = getStartDate(frequency);
+  const user       = req.user;
+  const orders     = read('orders').filter(o => o.enterpriseId === user.id && new Date(o.createdAt) >= start);
+  const choices    = read('choices').filter(c => c.enterpriseId === user.id && new Date(c.date) >= start);
+  const employees  = read('employees').filter(e => e.enterpriseId === user.id);
+  const totalSpent = orders.reduce((s, o) => s + (o.totalAmount || 0), 0);
+
+  const byResto = {};
+  orders.forEach(o => {
+    const k = o.restaurantName || 'Inconnu';
+    byResto[k] = (byResto[k] || 0) + (o.totalAmount || 0);
+  });
+
+  const blocks = [
+    {
+      title: `Rapport ${user.companyName} — ${PERIOD_LABELS[frequency] || frequency}`,
+      lines: [
+        `Employés : ${employees.length}`,
+        `Commandes passées : ${orders.length}`,
+        `Budget total : ${totalSpent} FCFA`,
+        `Repas commandés : ${choices.length}`,
+      ],
+    },
+    {
+      title: 'Dépenses par restaurant',
+      lines: Object.entries(byResto).length
+        ? Object.entries(byResto)
+            .sort((a, b) => b[1] - a[1])
+            .map(([name, amount]) => `${name} : ${amount} FCFA`)
+        : ['Aucune commande'],
+    },
+  ];
+
+  try {
+    const buf = await buildPDF(blocks);
+    sendPDF(res, `rapport-entreprise-${frequency}.pdf`, buf);
+  } catch (e) {
+    res.status(500).json({ error: 'Erreur génération PDF' });
+  }
+});
+
+// ── PDF stats admin ────────────────────────────────────────────────────────────
+app.get('/api/stats/pdf/admin', auth, requireRole('superadmin'), async (req, res) => {
+  const frequency   = req.query.frequency || 'monthly';
+  const start       = getStartDate(frequency);
+  const enterprises = read('enterprises');
+  const restaurants = read('restaurants');
+  const employees   = read('employees');
+  const orders      = read('orders').filter(o => new Date(o.createdAt) >= start);
+  const choices     = read('choices').filter(c => new Date(c.date) >= start);
+  const totalMob    = orders.reduce((s, o) => s + (o.totalAmount || 0), 0);
+
+  const byResto = {};
+  orders.forEach(o => {
+    const k = o.restaurantName || 'Inconnu';
+    byResto[k] = (byResto[k] || 0) + (o.totalAmount || 0);
+  });
+
+  const blocks = [
+    {
+      title: `Tableau de bord admin — ${PERIOD_LABELS[frequency] || frequency}`,
+      lines: [
+        `Entreprises : ${enterprises.length}`,
+        `Restaurants : ${restaurants.length}`,
+        `Employés : ${employees.length}`,
+        `Commandes (période) : ${orders.length}`,
+        `Chiffre d'affaires : ${totalMob} FCFA`,
+        `Repas commandés : ${choices.length}`,
+      ],
+    },
+    {
+      title: 'CA par restaurant',
+      lines: Object.entries(byResto).length
+        ? Object.entries(byResto)
+            .sort((a, b) => b[1] - a[1])
+            .map(([name, amount]) => `${name} : ${amount} FCFA`)
+        : ['Aucune commande'],
+    },
+  ];
+
+  try {
+    const buf = await buildPDF(blocks);
+    sendPDF(res, `rapport-admin-${frequency}.pdf`, buf);
+  } catch (e) {
+    res.status(500).json({ error: 'Erreur génération PDF' });
+  }
+});
+
+// ── PDF liste des commandes du jour ──────────────────────────────────────────
+function buildOrderListPDF({ dateStr, summary, employees }) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 40, size: 'A4' });
+    const chunks = [];
+    doc.on('data', c => chunks.push(c));
+    doc.on('end',  () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    const PW = doc.page.width;
+    const M  = 40;
+    const CW = PW - M * 2;
+
+    // En-tête
+    doc.fontSize(24).font('Helvetica-Bold').fillColor('#F97316')
+      .text('LunchApp', M, M, { width: CW, lineBreak: false });
+    doc.moveDown(0.4);
+    doc.fontSize(13).font('Helvetica').fillColor('#1E293B')
+      .text('Liste des commandes du repas de midi', { width: CW });
+    doc.moveDown(0.2);
+    doc.fontSize(11).font('Helvetica').fillColor('#64748B')
+      .text(dateStr, { width: CW });
+    doc.moveDown(0.6);
+
+    // Séparateur
+    doc.moveTo(M, doc.y).lineTo(PW - M, doc.y).strokeColor('#E2E8F0').lineWidth(1).stroke();
+    doc.moveDown(0.8);
+
+    // RÉSUMÉ
+    doc.fontSize(11).font('Helvetica-Bold').fillColor('#1E293B')
+      .text('RÉSUMÉ DES COMMANDES', { width: CW });
+    doc.moveDown(0.4);
+
+    if (summary.length) {
+      summary.forEach(({ name, count }) => {
+        doc.fontSize(10).font('Helvetica').fillColor('#334155')
+          .text(`${name} × ${count}`, { width: CW });
+        doc.moveDown(0.1);
+      });
+    } else {
+      doc.fontSize(10).font('Helvetica').fillColor('#94A3B8')
+        .text('Aucune commande enregistrée.', { width: CW });
+    }
+    doc.moveDown(0.4);
+
+    const totalRepas = employees.length;
+    doc.fontSize(10).font('Helvetica-Bold').fillColor('#1E293B')
+      .text(`TOTAL  ${totalRepas} repas`, { width: CW });
+    doc.moveDown(0.8);
+
+    // Séparateur
+    doc.moveTo(M, doc.y).lineTo(PW - M, doc.y).strokeColor('#E2E8F0').lineWidth(0.5).stroke();
+    doc.moveDown(0.8);
+
+    // DÉTAIL PAR EMPLOYÉ
+    doc.fontSize(11).font('Helvetica-Bold').fillColor('#1E293B')
+      .text('DÉTAIL PAR EMPLOYÉ', { width: CW });
+    doc.moveDown(0.5);
+
+    // Tableau
+    const cols   = [30, 190, 210, 85]; // N°, Employé, Repas choisi, Heure
+    const labels = ['N°', 'Employé', 'Repas choisi', 'Heure'];
+    const RH     = 22;
+    let ty = doc.y;
+
+    // En-tête du tableau
+    doc.rect(M, ty, CW, RH).fill('#1E293B');
+    let cx = M;
+    labels.forEach((h, i) => {
+      doc.fontSize(9).font('Helvetica-Bold').fillColor('#FFFFFF')
+        .text(h, cx + 5, ty + 6, { width: cols[i] - 10, lineBreak: false });
+      cx += cols[i];
+    });
+    ty += RH;
+
+    // Lignes de données
+    employees.forEach((emp, idx) => {
+      const bg = idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC';
+      doc.rect(M, ty, CW, RH).fillAndStroke(bg, '#E2E8F0');
+      cx = M;
+      [String(emp.num), emp.name, emp.meal, emp.time].forEach((cell, i) => {
+        doc.fontSize(9).font('Helvetica').fillColor('#334155')
+          .text(cell, cx + 5, ty + 6, { width: cols[i] - 10, lineBreak: false, ellipsis: true });
+        cx += cols[i];
+      });
+      ty += RH;
+    });
+
+    if (!employees.length) {
+      doc.rect(M, ty, CW, RH).fill('#FAFAFA');
+      doc.fontSize(9).font('Helvetica').fillColor('#94A3B8')
+        .text("Aucun employ\u00e9 n'a encore fait son choix.", M, ty + 6, { width: CW, align: 'center', lineBreak: false });
+    }
+
+    doc.end();
+  });
+}
+
+app.get('/api/stats/pdf/orders', auth, requireRole('enterprise'), async (req, res) => {
+  const user    = req.user;
+  const today   = new Date().toISOString().split('T')[0];
+  const choices = read('choices').filter(c => c.enterpriseId === user.id && c.date === today);
+
+  const now     = new Date();
+  const raw     = now.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const dateStr = raw.charAt(0).toUpperCase() + raw.slice(1);
+
+  // Résumé
+  const itemCounts = {};
+  choices.forEach(c => {
+    if (c.foodItem)  itemCounts[c.foodItem.name]  = (itemCounts[c.foodItem.name]  || 0) + 1;
+    if (c.drinkItem) itemCounts[c.drinkItem.name] = (itemCounts[c.drinkItem.name] || 0) + 1;
+  });
+  const summary = Object.entries(itemCounts).map(([name, count]) => ({ name, count }));
+
+  // Détail
+  const employees = choices.map((c, i) => ({
+    num:  i + 1,
+    name: c.userName || c.userId,
+    meal: [c.foodItem?.name, c.drinkItem?.name].filter(Boolean).join(' + ') || '—',
+    time: new Date(c.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+  }));
+
+  try {
+    const buf = await buildOrderListPDF({ dateStr, summary, employees });
+    sendPDF(res, `commandes-${today}.pdf`, buf);
+  } catch (e) {
+    res.status(500).json({ error: 'Erreur génération PDF' });
+  }
+});
+
+// ── Démarrage du serveur ──────────────────────────────────────────────────────
+if (require.main === module) {
+  app.listen(PORT, 'localhost', () => {
+    console.log(`🚀 LunchApp v2 démarré → http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;

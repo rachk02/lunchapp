@@ -12,7 +12,13 @@
       "Bash(findstr \"LISTENING\")",
       "Bash(findstr /C:\"nodemon\" /C:\"scripts\")",
       "Bash(taskkill:*)",
-      "Bash(powershell -Command \"Stop-Process -Id 16872 -Force\" 2>&1)"
+      "Bash(powershell -Command \"Stop-Process -Id 16872 -Force\" 2>&1)",
+      "Bash(node:*)",
+      "Bash(\"F:\\\\Arlette\\\\FoodChoose\\\\lunchapp\\\\public\\\\style.css\":*)",
+      "Bash(find F:/Arlette/FoodChoose/lunchapp/data -type f -name *.json)",
+      "Bash(node -e \"require\\(''cors''\\)\")",
+      "Bash(node -e \"require\\(''''./server''''\\)\")",
+      "Bash(npx jest:*)"
     ]
   }
 }
