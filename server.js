@@ -93,7 +93,8 @@ async function sendWelcomeEmail({ to, name, role }) {
 }
 
 // ── Dossier data ──────────────────────────────────────────────────────────────
-const DB_DIR = process.env.DB_DIR || path.join(__dirname, 'data');
+const DB_DIR = process.env.DB_DIR
+  || (process.env.VERCEL ? '/tmp/data' : path.join(__dirname, 'data'));
 if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
 
 const FILES = {
