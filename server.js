@@ -21,7 +21,7 @@ const LOCK_MIN   = 5; // minutes avant verrouillage du choix
 
 app.use(cors());
 app.use(express.json({ limit: '20mb' }));
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, 'public')));
 
 // ── Superadmin (via .env) ─────────────────────────────────────────────────────
 const SUPERADMIN = {
