@@ -1,12 +1,22 @@
 [
   {
-    "id": "mn857eti29dsm6",
+    "id": "mn959gvhtix6n2",
     "fullName": "Mahamadi TASSEMBEDO",
     "gender": "male",
-    "password": "$2a$10$eC5BQPU/MneO40ngp/QGteV2XJpEZqfDLmcTCaVt.E83Gm5r6xwja",
+    "password": "$2a$10$3un8CIByN65P025hf/trJOPGlpmUUtvI/MKqfPhGE2v1c6JX7J/Bq",
     "role": "employee",
-    "enterpriseId": "mn855ia9magpel",
+    "enterpriseId": "mn94fh57vnrd6w",
     "enterpriseName": "El Immeka International",
-    "createdAt": "2026-03-27T00:07:57.126Z"
+    "createdAt": "2026-03-27T16:57:19.277Z"
+  },
+  {
+    "id": "mn95ae70un4rre",
+    "fullName": "Dalissa DALA",
+    "gender": "female",
+    "password": "$2a$10$ccQGZmvrAaoijP4p826ghuuDo.20bJaVfBR.37zbcDa3kzTOsW2nK",
+    "role": "employee",
+    "enterpriseId": "mn94fh57vnrd6w",
+    "enterpriseName": "El Immeka International",
+    "createdAt": "2026-03-27T16:58:02.460Z"
   }
 ]

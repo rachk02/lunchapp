@@ -18,7 +18,10 @@
       "Bash(find F:/Arlette/FoodChoose/lunchapp/data -type f -name *.json)",
       "Bash(node -e \"require\\(''cors''\\)\")",
       "Bash(node -e \"require\\(''''./server''''\\)\")",
-      "Bash(npx jest:*)"
+      "Bash(npx jest:*)",
+      "Bash(\"F:/Arlette/FoodChoose/lunchapp/data/invoices.json\")",
+      "Bash(npm audit:*)",
+      "Bash(awk 'NR>=165 && NR<=175' public/index.html)"
     ]
   }
 }

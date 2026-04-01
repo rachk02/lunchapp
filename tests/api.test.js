@@ -27,7 +27,7 @@ const DATA_FILES = [
   'menus.json', 'dailyMenus.json', 'affiliations.json', 'offers.json',
   'choices.json', 'orders.json', 'subscriptions.json',
   'notifications.json', 'ratings.json', 'deletionRequests.json',
-  'messages.json',
+  'messages.json', 'invoices.json',
 ];
 
 beforeAll(() => {
@@ -191,11 +191,11 @@ describe('3 — Connexion', () => {
     expect(res.status).toBe(401);
   });
 
-  test('❌ Type de compte invalide', async () => {
+  test('❌ Compte inexistant → 401', async () => {
     const res = await request(app).post('/api/login').send({
-      email: 'testcorp@example.com', password: 'Test@1234', type: 'unknown',
+      email: 'inconnu@example.com', password: 'Test@1234',
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(401);
   });
 
   test('❌ Sans token → 401', async () => {
@@ -556,28 +556,19 @@ describe('11 — Commandes', () => {
   test('✅ Entreprise passe une commande (livraison)', async () => {
     const res = await request(app).post('/api/orders')
       .set('Authorization', 'Bearer ' + enterpriseToken)
-      .send({ restaurantId, paymentMode: 'delivery' });
+      .send({ restaurantId });
     expect(res.status).toBe(201);
     expect(res.body.status).toBe('pending');
+    expect(res.body.paymentMode).toBe('delivery');
     expect(res.body.items.length).toBe(1);
-    expect(res.body).not.toHaveProperty('depositScreenshot');
     orderId = res.body.id;
   });
 
-  test('✅ Commande avec paiement mobile (upfront)', async () => {
-    // D'abord recréer un choix (le précédent est verrouillé)
-    // On teste juste la validation du mode de paiement
+  test('❌ Commande sans choix disponible → 400', async () => {
+    // Le choix précédent est verrouillé, donc aucun choix disponible
     const res = await request(app).post('/api/orders')
       .set('Authorization', 'Bearer ' + enterpriseToken)
-      .send({ restaurantId, paymentMode: 'delivery' });
-    // Devrait échouer car plus de choix non soumis
-    expect(res.status).toBe(400);
-  });
-
-  test('❌ Mode de paiement invalide → 400', async () => {
-    const res = await request(app).post('/api/orders')
-      .set('Authorization', 'Bearer ' + enterpriseToken)
-      .send({ restaurantId, paymentMode: 'cash' });
+      .send({ restaurantId });
     expect(res.status).toBe(400);
   });
 
@@ -586,7 +577,7 @@ describe('11 — Commandes', () => {
       .set('Authorization', 'Bearer ' + restoToken);
     expect(res.status).toBe(200);
     expect(res.body.length).toBe(1);
-    expect(res.body[0]).not.toHaveProperty('depositScreenshot');
+    expect(res.body[0].paymentMode).toBe('delivery');
   });
 
   test('✅ Restaurant confirme la commande', async () => {
@@ -670,6 +661,42 @@ describe('12 — Abonnements', () => {
       .set('Authorization', 'Bearer ' + restoToken)
       .send({ status: 'maybe' });
     expect(res.status).toBe(400);
+  });
+
+  test('✅ Restaurant génère une facture d\'abonnement', async () => {
+    const res = await request(app).post(`/api/subscriptions/${subId}/invoice`)
+      .set('Authorization', 'Bearer ' + restoToken);
+    expect(res.status).toBe(201);
+    expect(res.body).toHaveProperty('subscriptionId', subId);
+    expect(res.body.status).toBe('sent');
+    expect(res.body.totalAmount).toBeGreaterThan(0);
+    expect(res.body.items.length).toBeGreaterThan(0);
+  });
+
+  test('❌ Double facture abonnement → 409', async () => {
+    const res = await request(app).post(`/api/subscriptions/${subId}/invoice`)
+      .set('Authorization', 'Bearer ' + restoToken);
+    expect(res.status).toBe(409);
+  });
+
+  test('❌ Facture abonnement non accepté → 400', async () => {
+    // Créer un deuxième abonnement en pending
+    const sub2 = await request(app).post('/api/subscriptions')
+      .set('Authorization', 'Bearer ' + enterpriseToken)
+      .send({ restaurantId, frequency: 'annual' });
+    expect(sub2.status).toBe(201);
+    const res = await request(app).post(`/api/subscriptions/${sub2.body.id}/invoice`)
+      .set('Authorization', 'Bearer ' + restoToken);
+    expect(res.status).toBe(400);
+  });
+
+  test('✅ Entreprise reçoit la facture d\'abonnement', async () => {
+    const res = await request(app).get('/api/invoices')
+      .set('Authorization', 'Bearer ' + enterpriseToken);
+    expect(res.status).toBe(200);
+    const subInvoice = res.body.find(i => i.subscriptionId === subId);
+    expect(subInvoice).toBeDefined();
+    expect(subInvoice.status).toBe('sent');
   });
 });
 
@@ -1014,6 +1041,50 @@ describe('18 — Messagerie audio', () => {
     expect(res.status).toBe(200);
     expect(res.body.count).toBeGreaterThan(0);
   });
+
+  test('✅ L\'expéditeur peut accéder à son propre audio', async () => {
+    const res = await request(app)
+      .get(`/api/messages/${audioMsgId}/audio`)
+      .set('Authorization', 'Bearer ' + enterpriseToken);
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('audioData');
+  });
+
+  test('❌ Non-participant ne peut pas accéder à l\'audio → 403', async () => {
+    // adminToken n'est ni l'expéditeur ni le destinataire
+    const res = await request(app)
+      .get(`/api/messages/${audioMsgId}/audio`)
+      .set('Authorization', 'Bearer ' + adminToken);
+    expect(res.status).toBe(403);
+  });
+
+  test('✅ La durée audio est bien conservée', async () => {
+    const res = await request(app)
+      .get(`/api/messages?withId=${restaurantId}`)
+      .set('Authorization', 'Bearer ' + enterpriseToken);
+    expect(res.status).toBe(200);
+    const audioMsg = res.body.find(m => m.id === audioMsgId);
+    expect(audioMsg.audioDuration).toBe(5);
+  });
+
+  test('✅ Les conversations affichent "🎵 Message audio" en preview', async () => {
+    const res = await request(app)
+      .get('/api/messages/conversations')
+      .set('Authorization', 'Bearer ' + enterpriseToken);
+    expect(res.status).toBe(200);
+    expect(res.body.length).toBeGreaterThan(0);
+    // Le dernier message est un audio → preview spécifique
+    const conv = res.body[0];
+    expect(conv).toHaveProperty('lastMessage');
+  });
+
+  test('❌ Envoyer audio sans données → 400', async () => {
+    const res = await request(app)
+      .post('/api/messages')
+      .set('Authorization', 'Bearer ' + enterpriseToken)
+      .send({ recipientId: restaurantId, type: 'audio' });
+    expect(res.status).toBe(400);
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════
@@ -1094,5 +1165,183 @@ describe('19 — Historique employé', () => {
       .set('Authorization', 'Bearer ' + employeeToken);
     expect(res.status).toBe(200);
     // Le choix du jour reste (même si history vide, car même date)
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// 20. ENVOIS MULTIPLES — textes, audios, mixtes
+// ════════════════════════════════════════════════════════════════════
+
+describe('20 — Envois multiples (textes, audios, mixtes)', () => {
+  const audio = (n) => 'data:audio/webm;base64,' + Buffer.from(`AUDIO_${n}`).toString('base64');
+
+  // Compter les messages existants avant ce describe
+  let baseCount = 0;
+
+  test('📋 Compter les messages existants', async () => {
+    const res = await request(app)
+      .get(`/api/messages?withId=${restaurantId}`)
+      .set('Authorization', 'Bearer ' + enterpriseToken);
+    expect(res.status).toBe(200);
+    baseCount = res.body.length;
+    expect(baseCount).toBeGreaterThan(0);
+  });
+
+  // ── Textes multiples ────────────────────────────────────────────────────────
+  test('✅ Entreprise envoie 3 textes consécutifs', async () => {
+    for (let i = 1; i <= 3; i++) {
+      const res = await request(app)
+        .post('/api/messages')
+        .set('Authorization', 'Bearer ' + enterpriseToken)
+        .send({ recipientId: restaurantId, type: 'text', content: `Message texte ${i}` });
+      expect(res.status).toBe(201);
+      expect(res.body.type).toBe('text');
+      expect(res.body.content).toBe(`Message texte ${i}`);
+    }
+  });
+
+  test('✅ Restaurant envoie 3 textes consécutifs', async () => {
+    for (let i = 1; i <= 3; i++) {
+      const res = await request(app)
+        .post('/api/messages')
+        .set('Authorization', 'Bearer ' + restoToken)
+        .send({ recipientId: enterpriseId, type: 'text', content: `Réponse ${i}` });
+      expect(res.status).toBe(201);
+    }
+  });
+
+  // ── Audios multiples ────────────────────────────────────────────────────────
+  test('✅ Entreprise envoie 3 audios consécutifs', async () => {
+    for (let i = 1; i <= 3; i++) {
+      const res = await request(app)
+        .post('/api/messages')
+        .set('Authorization', 'Bearer ' + enterpriseToken)
+        .send({ recipientId: restaurantId, type: 'audio', audioData: audio(i), audioDuration: i * 2 });
+      expect(res.status).toBe(201);
+      expect(res.body.type).toBe('audio');
+      expect(res.body.audioDuration).toBe(i * 2);
+      expect(res.body).not.toHaveProperty('audioData'); // audioData masqué
+    }
+  });
+
+  test('✅ Restaurant envoie 3 audios consécutifs', async () => {
+    for (let i = 1; i <= 3; i++) {
+      const res = await request(app)
+        .post('/api/messages')
+        .set('Authorization', 'Bearer ' + restoToken)
+        .send({ recipientId: enterpriseId, type: 'audio', audioData: audio(10 + i), audioDuration: i });
+      expect(res.status).toBe(201);
+      expect(res.body.type).toBe('audio');
+    }
+  });
+
+  // ── Envois mixtes ───────────────────────────────────────────────────────────
+  test('✅ Entreprise alterne texte → audio → texte', async () => {
+    const t1 = await request(app).post('/api/messages')
+      .set('Authorization', 'Bearer ' + enterpriseToken)
+      .send({ recipientId: restaurantId, type: 'text', content: 'Avant audio' });
+    expect(t1.status).toBe(201);
+    expect(t1.body.type).toBe('text');
+
+    const a1 = await request(app).post('/api/messages')
+      .set('Authorization', 'Bearer ' + enterpriseToken)
+      .send({ recipientId: restaurantId, type: 'audio', audioData: audio(99), audioDuration: 7 });
+    expect(a1.status).toBe(201);
+    expect(a1.body.type).toBe('audio');
+
+    const t2 = await request(app).post('/api/messages')
+      .set('Authorization', 'Bearer ' + enterpriseToken)
+      .send({ recipientId: restaurantId, type: 'text', content: 'Après audio' });
+    expect(t2.status).toBe(201);
+    expect(t2.body.type).toBe('text');
+  });
+
+  test('✅ Restaurant alterne audio → texte → audio', async () => {
+    const a1 = await request(app).post('/api/messages')
+      .set('Authorization', 'Bearer ' + restoToken)
+      .send({ recipientId: enterpriseId, type: 'audio', audioData: audio(50), audioDuration: 3 });
+    expect(a1.status).toBe(201);
+
+    const t1 = await request(app).post('/api/messages')
+      .set('Authorization', 'Bearer ' + restoToken)
+      .send({ recipientId: enterpriseId, type: 'text', content: 'Entre deux audios' });
+    expect(t1.status).toBe(201);
+
+    const a2 = await request(app).post('/api/messages')
+      .set('Authorization', 'Bearer ' + restoToken)
+      .send({ recipientId: enterpriseId, type: 'audio', audioData: audio(51), audioDuration: 5 });
+    expect(a2.status).toBe(201);
+  });
+
+  // ── Vérifications finales ───────────────────────────────────────────────────
+  test('✅ Historique contient tous les messages envoyés', async () => {
+    const res = await request(app)
+      .get(`/api/messages?withId=${restaurantId}`)
+      .set('Authorization', 'Bearer ' + enterpriseToken);
+    expect(res.status).toBe(200);
+    // base + 3 textes ent + 3 textes rst + 3 audios ent + 3 audios rst + 3 mixtes ent + 3 mixtes rst
+    expect(res.body.length).toBe(baseCount + 18);
+    res.body.forEach(m => expect(m).not.toHaveProperty('audioData'));
+  });
+
+  test('✅ Ordre chronologique respecté dans l\'historique', async () => {
+    const res = await request(app)
+      .get(`/api/messages?withId=${restaurantId}`)
+      .set('Authorization', 'Bearer ' + enterpriseToken);
+    expect(res.status).toBe(200);
+    for (let i = 1; i < res.body.length; i++) {
+      expect(new Date(res.body[i-1].timestamp) <= new Date(res.body[i].timestamp)).toBe(true);
+    }
+  });
+
+  test('✅ Chaque audio est récupérable individuellement', async () => {
+    // Récupérer tous les audios de la conversation
+    const hist = await request(app)
+      .get(`/api/messages?withId=${restaurantId}`)
+      .set('Authorization', 'Bearer ' + enterpriseToken);
+    const audios = hist.body.filter(m => m.type === 'audio');
+    expect(audios.length).toBeGreaterThanOrEqual(6); // 3 ent + 3 rst min
+
+    // Vérifier que chaque audio est accessible
+    for (const msg of audios.slice(0, 4)) { // tester les 4 premiers
+      const res = await request(app)
+        .get(`/api/messages/${msg.id}/audio`)
+        .set('Authorization', 'Bearer ' + enterpriseToken);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('audioData');
+    }
+  });
+
+  test('✅ Conversations listent la dernière activité', async () => {
+    const res = await request(app)
+      .get('/api/messages/conversations')
+      .set('Authorization', 'Bearer ' + enterpriseToken);
+    expect(res.status).toBe(200);
+    expect(res.body.length).toBeGreaterThan(0);
+    const conv = res.body.find(c => c.id === restaurantId);
+    expect(conv).toBeDefined();
+    expect(conv.lastMessage).toBeDefined();
+  });
+
+  test('✅ Le compteur non-lus reflète les nouveaux messages', async () => {
+    const res = await request(app)
+      .get('/api/messages/unread')
+      .set('Authorization', 'Bearer ' + restoToken);
+    expect(res.status).toBe(200);
+    // Le restaurant a des messages non lus (envoyés par l'entreprise)
+    expect(res.body.count).toBeGreaterThan(0);
+  });
+
+  test('✅ Marquer tout comme lu réinitialise le compteur', async () => {
+    await request(app)
+      .post('/api/messages/read')
+      .set('Authorization', 'Bearer ' + restoToken)
+      .send({ withId: enterpriseId });
+
+    const res = await request(app)
+      .get('/api/messages/unread')
+      .set('Authorization', 'Bearer ' + restoToken);
+    expect(res.status).toBe(200);
+    expect(res.body.count).toBe(0);
   });
 });

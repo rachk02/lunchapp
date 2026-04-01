@@ -6,6 +6,7 @@
 let token     = localStorage.getItem('la_token') || null;
 let me        = JSON.parse(localStorage.getItem('la_user') || 'null');
 let sseSource = null;
+let sseRetryTimer = null;
 
 // Data caches (indexed by ID for safe onclick references)
 const _menuItemCache = {};
@@ -25,6 +26,28 @@ let _audioChunks      = [];
 let _recTimerInterval = null;
 let _recSeconds       = 0;
 let _confirmCallback  = null;
+
+const SPECIALTIES = [
+  'Cuisine africaine','Cuisine ivoirienne','Cuisine burkinabè','Cuisine sénégalaise',
+  'Grillades / Brochettes','Fast food / Sandwichs','Pizzas','Burgers',
+  'Cuisine asiatique','Cuisine française','Fruits de mer','Soupes / Bouillons',
+  'Cuisine végétarienne','Pâtisserie / Desserts','Cuisine fusion',
+];
+
+function renderSpecialtyCheckboxes(containerId, selected = []) {
+  const sel = Array.isArray(selected) ? selected : (selected ? [selected] : []);
+  const c = document.getElementById(containerId);
+  if (!c) return;
+  c.innerHTML = SPECIALTIES.map(s =>
+    `<label class="spec-chip"><input type="checkbox" value="${s}" ${sel.includes(s)?'checked':''}> ${s}</label>`
+  ).join('');
+}
+
+function collectSpecialties(containerId) {
+  const c = document.getElementById(containerId);
+  if (!c) return [];
+  return Array.from(c.querySelectorAll('input[type="checkbox"]:checked')).map(i => i.value);
+}
 let _adminTab         = 'ov';
 
 // ─── Utilitaires ─────────────────────────────────────────────────────────────
@@ -81,6 +104,17 @@ async function api(method, path, body) {
   const r = await fetch(path, opts);
   let data;
   try { data = await r.json(); } catch { data = {}; }
+  if (r.status === 401) {
+    const msg = data.error || 'Session expirée';
+    localStorage.removeItem('la_token');
+    localStorage.removeItem('la_user');
+    token = null; me = null;
+    if (sseSource) { sseSource.close(); sseSource = null; }
+    if (sseRetryTimer) { clearTimeout(sseRetryTimer); sseRetryTimer = null; }
+    toast(msg + ' — Veuillez vous reconnecter.', 'error');
+    setTimeout(showLanding, 1800);
+    throw new Error(msg);
+  }
   if (!r.ok) throw new Error(data.error || `Erreur ${r.status}`);
   return data;
 }
@@ -124,15 +158,44 @@ function collectPayEntries(containerId) {
 }
 
 // ─── Navigation screens ───────────────────────────────────────────────────────
-function showLanding() {
-  el('screen-landing').classList.remove('hidden');
-  el('screen-auth').classList.add('hidden');
-  el('screen-app').classList.add('hidden');
+function fadeIn(id) {
+  const s = el(id);
+  s.classList.remove('hidden');
+  s.classList.remove('screen-enter');
+  void s.offsetWidth; // force reflow pour relancer l'animation
+  s.classList.add('screen-enter');
 }
-function showAuth(tab) {
-  el('screen-landing').classList.add('hidden');
-  el('screen-auth').classList.remove('hidden');
+
+function showLanding() {
+  el('auth-modal').classList.add('hidden');
   el('screen-app').classList.add('hidden');
+  fadeIn('screen-landing');
+  loadPublicStats();
+}
+
+function closeAuthModal() {
+  el('auth-modal').classList.add('hidden');
+}
+
+async function loadPublicStats() {
+  try {
+    const r = await fetch('/api/stats/public');
+    if (!r.ok) return;
+    const d = await r.json();
+    const eEl = el('land-stat-enterprises');
+    const rEl = el('land-stat-restaurants');
+    if (eEl) eEl.textContent = d.enterprises || '—';
+    if (rEl) rEl.textContent = d.restaurants || '—';
+  } catch (_) {}
+}
+
+function showAuth(tab) {
+  const modal = el('auth-modal');
+  modal.classList.remove('hidden');
+  const card = modal.querySelector('.auth-modal-card');
+  card.classList.remove('screen-enter');
+  void card.offsetWidth;
+  card.classList.add('screen-enter');
   authTab(tab || 'login');
 }
 function authTab(tab) {
@@ -189,10 +252,9 @@ function showPane(id) {
   const target = el('pane-' + id);
   if (target) {
     target.classList.remove('hidden');
-    // Sidebar highlight
-    document.querySelectorAll('.sidebar-item').forEach(b => b.classList.remove('active'));
-    const btn = document.querySelector(`.sidebar-item[data-pane="${id}"]`);
-    if (btn) btn.classList.add('active');
+    // Sidebar + bottom-nav highlight
+    document.querySelectorAll('.sidebar-item, .bnav-item').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll(`[data-pane="${id}"]`).forEach(b => b.classList.add('active'));
     // Auto-load
     onPaneLoad(id);
   }
@@ -206,7 +268,7 @@ function onPaneLoad(id) {
     case 'ent-today':       loadEntToday(); break;
     case 'ent-restaurants': loadEntRestaurants(); break;
     case 'ent-menus':       loadEntMenus(); break;
-    case 'ent-employees':   loadEntEmployees(); loadEntOrders(); loadEntStats(); break;
+    case 'ent-employees':   switchEntTab('emps'); break;
     case 'ent-messages':    loadConversations('ent'); break;
     case 'emp-menu':        loadEmpMenu(); break;
     case 'emp-history':     loadEmpHistory(); break;
@@ -215,20 +277,36 @@ function onPaneLoad(id) {
   }
 }
 
+// ─── Enterprise — onglets internes ────────────────────────────────────────────
+let _entTab = 'emps';
+function switchEntTab(tab) {
+  _entTab = tab;
+  ['emps', 'orders', 'invoices', 'stats'].forEach(t => {
+    const btn   = el('dtab-' + t);
+    const panel = el('dtab-panel-' + t);
+    if (btn)   btn.classList.toggle('active', t === tab);
+    if (panel) panel.classList.toggle('hidden', t !== tab);
+  });
+  if (tab === 'emps')     loadEntEmployees();
+  if (tab === 'orders')   loadEntOrders();
+  if (tab === 'invoices') loadEntInvoices();
+  if (tab === 'stats')    loadEntStats();
+}
+
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 function buildSidebar(role) {
   const items = {
     restauratrice: [
-      { id: 'resto-home', icon: '🏠', label: 'Accueil & Stats' },
-      { id: 'menus',      icon: '📝', label: 'Mes plats' },
-      { id: 'clientele',  icon: '👥', label: 'Clientèle' },
+      { id: 'resto-home',   icon: '🏠', label: 'Accueil' },
+      { id: 'menus',        icon: '📝', label: 'Mes plats' },
+      { id: 'clientele',    icon: '📦', label: 'Commandes' },
       { id: 'rst-messages', icon: '💬', label: 'Messages' },
     ],
     enterprise: [
       { id: 'ent-today',       icon: '📋', label: 'Aujourd\'hui' },
       { id: 'ent-restaurants', icon: '🍴', label: 'Restaurants' },
       { id: 'ent-menus',       icon: '🗒️', label: 'Menus' },
-      { id: 'ent-employees',   icon: '👥', label: 'Employés & Stats' },
+      { id: 'ent-employees',   icon: '👥', label: 'Gestion' },
       { id: 'ent-messages',    icon: '💬', label: 'Messages' },
     ],
     employee: [
@@ -239,20 +317,37 @@ function buildSidebar(role) {
       { id: 'admin', icon: '⚙️', label: 'Administration' },
     ],
   };
-  const nav = el('sidebar');
-  nav.innerHTML = (items[role] || []).map(it =>
-    `<button class="sidebar-item" data-pane="${it.id}" onclick="showPane('${it.id}')">${it.icon} ${it.label}</button>`
+  const list = items[role] || [];
+
+  const displayName = me.companyName || me.restaurantName || me.fullName || 'Admin';
+  const initials = getUserInitials();
+  const roleLabel = { enterprise: 'Entreprise', restauratrice: 'Restaurant', employee: 'Employé', superadmin: 'Administrateur' }[role] || role;
+
+  el('sidebar').innerHTML = `
+    <div class="sidebar-nav">
+      ${list.map(it => `<button class="sidebar-item" data-pane="${it.id}" onclick="showPane('${it.id}')"><span class="sb-icon">${it.icon}</span><span class="sb-label">${it.label}</span></button>`).join('')}
+    </div>
+    <div class="sidebar-footer">
+      <div class="sidebar-avatar-circle">${esc(initials)}</div>
+      <div class="sidebar-user-meta">
+        <div class="sidebar-user-name">${esc(displayName)}</div>
+        <div class="sidebar-user-role">${roleLabel}</div>
+      </div>
+    </div>`;
+
+  const bn = el('bottom-nav');
+  if (bn) bn.innerHTML = list.map(it =>
+    `<button class="bnav-item" data-pane="${it.id}" onclick="showPane('${it.id}')"><span class="bnav-icon">${it.icon}</span>${it.label}</button>`
   ).join('');
 }
 
 // ─── Login / Register / Logout ────────────────────────────────────────────────
 async function doLogin() {
-  const type  = document.querySelector('input[name="ltype"]:checked')?.value;
   const email = el('l-id').value.trim();
   const pwd   = el('l-pwd').value;
   if (!email || !pwd) { toast('Remplissez tous les champs', 'error'); return; }
   try {
-    const d = await api('POST', '/api/login', { email, password: pwd, type });
+    const d = await api('POST', '/api/login', { email, password: pwd });
     token = d.token;
     me    = d.user;
     localStorage.setItem('la_token', token);
@@ -277,7 +372,7 @@ async function doRegister(type) {
       const email          = el('r-remail').value.trim();
       const phone          = el('r-rphone').value.trim();
       const address        = el('r-addr').value.trim();
-      const specialty      = el('r-spec').value.trim();
+      const specialty      = collectSpecialties('r-spec-container');
       const paymentInfo    = collectPayEntries('pay-entries');
       const password       = el('r-rpwd').value;
       d = await api('POST', '/api/restauratrice/register', { restaurantName, fullName, email, phone, address, specialty, paymentInfo, password });
@@ -295,19 +390,30 @@ function doLogout() {
   localStorage.removeItem('la_token');
   localStorage.removeItem('la_user');
   token = null; me = null;
+  delete document.body.dataset.role;
   if (sseSource) { sseSource.close(); sseSource = null; }
   showLanding();
 }
 
 // ─── App init ─────────────────────────────────────────────────────────────────
+function getUserInitials() {
+  const name = (me && (me.companyName || me.restaurantName || me.fullName)) || 'U';
+  const words = name.trim().split(/\s+/);
+  return (words.length === 1 ? words[0].slice(0, 2) : (words[0][0] + words[words.length - 1][0])).toUpperCase();
+}
+
 function startApp() {
   el('screen-landing').classList.add('hidden');
-  el('screen-auth').classList.add('hidden');
-  el('screen-app').classList.remove('hidden');
+  el('auth-modal').classList.add('hidden');
+  document.body.dataset.role = me.role;
+  fadeIn('screen-app');
 
   el('uname').textContent = me.companyName || me.restaurantName || me.fullName || 'Admin';
   const roleLabels = { enterprise: 'Entreprise', restauratrice: 'Restaurant', employee: 'Employé', superadmin: 'Admin' };
   el('urole').textContent = roleLabels[me.role] || me.role;
+
+  const avatarEl = el('app-avatar');
+  if (avatarEl) avatarEl.textContent = getUserInitials();
 
   buildSidebar(me.role);
   connectSSE();
@@ -318,15 +424,51 @@ function startApp() {
 }
 
 // ─── SSE ──────────────────────────────────────────────────────────────────────
+let _sseRetryCount = 0;
 function connectSSE() {
-  if (sseSource) sseSource.close();
+  if (sseSource) { sseSource.close(); sseSource = null; }
+  if (!token) return;
+
   sseSource = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
+
+  sseSource.addEventListener('connected', () => { _sseRetryCount = 0; });
+
   sseSource.addEventListener('notification', e => {
     const notif = JSON.parse(e.data);
     updateNotifBadge();
     toast(notif.title + ': ' + notif.message, 'info');
+    // Si c'est une mise à jour de menu et que l'employé est sur la vue menu, rafraîchir
+    if (notif.type === 'menu_updated' && me && me.role === 'employee') {
+      const pane = el('pane-emp-menu');
+      if (pane && !pane.classList.contains('hidden')) loadEmpMenu();
+    }
   });
-  sseSource.onerror = () => setTimeout(connectSSE, 5000);
+
+  // Rafraîchir le chat ouvert dès réception d'un nouveau message
+  sseSource.addEventListener('new_message', e => {
+    const msg = JSON.parse(e.data);
+    if (_chatPartnerId && (msg.senderId === _chatPartnerId || msg.recipientId === _chatPartnerId)) {
+      refreshChat(_chatPartnerSuffix);
+    }
+    // Mettre à jour le badge de notifications
+    updateNotifBadge();
+  });
+
+  sseSource.onerror = () => {
+    if (!token) return; // Déconnecté, pas de retry
+    _sseRetryCount++;
+    // Arrêter après 5 tentatives (token probablement invalide)
+    if (_sseRetryCount > 5) {
+      if (sseSource) { sseSource.close(); sseSource = null; }
+      return;
+    }
+    if (!sseRetryTimer) {
+      sseRetryTimer = setTimeout(() => {
+        sseRetryTimer = null;
+        if (token) connectSSE();
+      }, Math.min(5000 * _sseRetryCount, 30000));
+    }
+  };
 }
 
 async function updateNotifBadge() {
@@ -347,17 +489,18 @@ async function loadRestoHome() {
   try {
     const r = await api('GET', '/api/restaurant/me');
     el('resto-profile-view').innerHTML = `
-      <div class="profile-card">
-        ${r.photo ? `<img src="${esc(r.photo)}" class="profile-photo"/>` : '<div class="profile-photo-placeholder">🍴</div>'}
-        <div class="profile-info">
+      <div class="dash-welcome">
+        ${r.photo
+          ? `<img src="${esc(r.photo)}" class="dash-welcome-photo"/>`
+          : '<div class="dash-welcome-ph">🍴</div>'}
+        <div class="dash-welcome-info">
           <h2>${esc(r.restaurantName)}</h2>
-          <p>${esc(r.fullName)} · ${esc(r.phone || '')}</p>
-          ${r.specialty ? `<p><em>${esc(r.specialty)}</em></p>` : ''}
-          ${r.address ? `<p>📍 ${esc(r.address)}</p>` : ''}
-          ${r.description ? `<p>${esc(r.description)}</p>` : ''}
-          ${r.paymentInfo?.length ? `<p>💳 ${r.paymentInfo.map(p => `${p.type}: ${esc(p.number)}`).join(' | ')}</p>` : ''}
+          <p>${esc(r.fullName)}${r.phone ? ' · ' + esc(r.phone) : ''}</p>
+          ${r.specialty ? `<p style="opacity:.75;font-size:12px;margin-top:2px">${esc(r.specialty)}</p>` : ''}
+          ${r.address   ? `<p style="opacity:.7;font-size:12px">📍 ${esc(r.address)}</p>` : ''}
+          ${r.paymentInfo?.length ? `<p style="opacity:.7;font-size:12px">💳 ${r.paymentInfo.map(p=>`${p.type}: ${esc(p.number)}`).join(' · ')}</p>` : ''}
         </div>
-        <button class="btn ghost sm" onclick="openProfileModal()">✏️ Modifier</button>
+        <button class="btn sm welcome-edit" onclick="openProfileModal()">✏️ Modifier</button>
       </div>`;
     await loadRestoStats();
   } catch (e) { toast(e.message, 'error'); }
@@ -369,21 +512,166 @@ async function loadRestoStats() {
     const s = await api('GET', `/api/stats/restaurant?frequency=${freq}`);
     const topItems = Object.entries(s.itemCounts || {}).sort((a,b) => b[1]-a[1]).slice(0,5);
     el('rst-stats').innerHTML = `
-      <div class="stats-grid">
-        <div class="stat-card"><div class="stat-num">${s.totalOrders}</div><div class="stat-lbl">Commandes</div></div>
-        <div class="stat-card"><div class="stat-num">${fmtPrice(s.totalRevenue)}</div><div class="stat-lbl">Recettes</div></div>
-        <div class="stat-card"><div class="stat-num">${s.avgRating ? s.avgRating.toFixed(1) + ' ⭐' : '—'}</div><div class="stat-lbl">Note moy. (${s.ratingCount})</div></div>
+      <div class="section-header">
+        <div class="section-icon">📊</div>
+        <h3>Statistiques</h3>
       </div>
-      ${topItems.length ? `<h4>Plats les + demandés</h4><ul class="item-list">${topItems.map(([n,c]) => `<li>${esc(n)} <span class="badge">${c}</span></li>`).join('')}</ul>` : ''}`;
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-icon">📦</div>
+          <div class="kpi-body"><div class="kpi-num">${s.totalOrders}</div><div class="kpi-lbl">Commandes</div></div>
+        </div>
+        <div class="kpi-card green">
+          <div class="kpi-icon">💰</div>
+          <div class="kpi-body"><div class="kpi-num">${fmtPrice(s.totalRevenue)}</div><div class="kpi-lbl">Recettes totales</div></div>
+        </div>
+        <div class="kpi-card blue">
+          <div class="kpi-icon">⭐</div>
+          <div class="kpi-body"><div class="kpi-num">${s.avgRating ? s.avgRating.toFixed(1) : '—'}</div><div class="kpi-lbl">Note moyenne (${s.ratingCount} avis)</div></div>
+        </div>
+      </div>
+      ${topItems.length ? `
+      <div class="section-header" style="margin-top:8px">
+        <div class="section-icon">🏆</div>
+        <h3>Plats les plus demandés</h3>
+      </div>
+      <ul class="item-list">${topItems.map(([n,c]) => `<li>${esc(n)} <span class="badge">${c}x</span></li>`).join('')}</ul>` : ''}`;
   } catch (e) { toast(e.message, 'error'); }
 }
 
-function pdfRestoStats() {
+async function pdfRestoStats() {
+  // ── Données ──────────────────────────────────────────────────────────────
+  const freq = el('rst-freq')?.value || 'monthly';
+  const freqLabels = { daily: "Aujourd'hui", weekly: '7 derniers jours', monthly: 'Ce mois', quarterly: 'Ce trimestre' };
+  let s;
+  try { s = await api('GET', `/api/stats/restaurant?frequency=${freq}`); }
+  catch(e) { toast('Impossible de charger les données', 'error'); return; }
+
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-  doc.text('Statistiques Restaurant — LunchApp', 14, 16);
-  doc.text(el('rst-stats').innerText, 14, 30);
-  doc.save('stats-restaurant.pdf');
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const W = 210, M = 14, CW = W - 2 * M;
+  const navy=[15,23,42], blue=[14,165,233], orange=[249,115,22], green=[34,197,94];
+  const light=[241,245,249], border=[226,232,240], dark=[30,41,59], gray=[100,116,139], white=[255,255,255];
+  const fmtN = n => Number(n||0).toLocaleString('fr-FR');
+  const fmtP = n => Number(n||0).toLocaleString('fr-FR') + ' FCFA';
+
+  function footer() {
+    const t = doc.getNumberOfPages();
+    for (let p = 1; p <= t; p++) {
+      doc.setPage(p);
+      doc.setFillColor(...navy); doc.rect(0, 285, W, 12, 'F');
+      doc.setFillColor(...orange); doc.rect(0, 285, 5, 12, 'F');
+      doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...gray);
+      doc.text('LunchApp — Rapport de performance restaurant', M+5, 292);
+      doc.text(`Page ${p} / ${t}`, W-M, 292, { align:'right' });
+    }
+  }
+
+  const rName = (me && me.restaurantName) || 'Restaurant';
+  const dateStr = new Date().toLocaleDateString('fr-FR', { day:'2-digit', month:'long', year:'numeric' });
+
+  // ── HEADER ──────────────────────────────────────────────────────────────
+  doc.setFillColor(...navy); doc.rect(0, 0, W, 50, 'F');
+  doc.setFillColor(...orange); doc.rect(0, 0, 5, 50, 'F');
+  // Titre + sous-titre
+  doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(...orange);
+  doc.text('LUNCHAPP — RAPPORT DE PERFORMANCE', M+5, 11);
+  doc.setFont('helvetica','bold'); doc.setFontSize(20); doc.setTextColor(...white);
+  doc.text(rName, M+5, 26);
+  doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(148,163,184);
+  doc.text(`Periode : ${freqLabels[freq]||freq}   |   Genere le : ${dateStr}`, M+5, 39);
+  // Badge note à droite
+  if (s.avgRating) {
+    doc.setFillColor(...orange); doc.roundedRect(W-M-30, 10, 30, 18, 3, 3, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(16); doc.setTextColor(...white);
+    doc.text(s.avgRating.toFixed(1), W-M-15, 22, { align:'center' });
+    doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(255,220,180);
+    doc.text(`/ 5  (${fmtN(s.ratingCount)} avis)`, W-M-15, 28, { align:'center' });
+  }
+
+  let y = 60;
+
+  // ── KPI CARDS (2 grandes) ────────────────────────────────────────────────
+  const cw2 = (CW - 6) / 2;
+  [[fmtN(s.totalOrders), 'Commandes recues', blue],
+   [fmtP(s.totalRevenue), 'Recettes totales', green]
+  ].forEach(([val, lbl, col], i) => {
+    const cx = M + i*(cw2+6);
+    doc.setFillColor(...light); doc.roundedRect(cx, y, cw2, 22, 2, 2, 'F');
+    doc.setFillColor(...col); doc.roundedRect(cx, y, cw2, 3.5, 2, 2, 'F'); doc.rect(cx, y+1.5, cw2, 2, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(i===1?9:17); doc.setTextColor(...col);
+    doc.text(val, cx+cw2/2, y+14, { align:'center', maxWidth: cw2-4 });
+    doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...gray);
+    doc.text(lbl, cx+cw2/2, y+19, { align:'center' });
+  });
+  y += 30;
+
+  // ── MOYENS DE PAIEMENT (barres) ──────────────────────────────────────────
+  const pays = Object.entries(s.paymentMethods || {}).sort((a,b)=>b[1]-a[1]);
+  if (pays.length) {
+    doc.setFillColor(...blue); doc.roundedRect(M, y, CW, 11, 2, 2, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...white);
+    doc.text('Repartition des paiements', M+5, y+7.5);
+    y += 15;
+
+    const maxPay = Math.max(...pays.map(([,v])=>v));
+    const barMaxW = CW - 55;
+    pays.forEach(([method, count]) => {
+      const pct = maxPay ? count / maxPay : 0;
+      const barW = Math.max(2, pct * barMaxW);
+      // Label
+      doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(...dark);
+      const mLabel = { OM:'Orange Money', Wave:'Wave', Moov:'Moov Money', Telecash:'Telecash' }[method] || method;
+      doc.text(mLabel, M, y+5.5);
+      // Barre de fond
+      doc.setFillColor(...border); doc.roundedRect(M+42, y+1, barMaxW, 6, 1, 1, 'F');
+      // Barre colorée
+      doc.setFillColor(...blue); doc.roundedRect(M+42, y+1, barW, 6, 1, 1, 'F');
+      // Compteur
+      doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(...blue);
+      doc.text(`${fmtN(count)}x  (${Math.round(pct*100)}%)`, M+42+barMaxW+3, y+5.5);
+      y += 11;
+    });
+    y += 6;
+  }
+
+  // ── TOP PLATS avec rang ──────────────────────────────────────────────────
+  const topItems = Object.entries(s.itemCounts||{}).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  if (topItems.length) {
+    if (y + 14 + topItems.length*9 > 272) { doc.addPage(); y = 20; }
+    doc.setFillColor(...orange); doc.roundedRect(M, y, CW, 11, 2, 2, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...white);
+    doc.text('Classement des plats & boissons', M+5, y+7.5);
+    y += 14;
+
+    doc.setFillColor(...border); doc.rect(M, y, CW, 7, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(7.5); doc.setTextColor(...gray);
+    doc.text('#', M+3, y+5); doc.text('PLAT / BOISSON', M+14, y+5);
+    doc.text('NB COMMANDES', W-M-4, y+5, { align:'right' });
+    y += 9;
+
+    const maxItem = topItems[0][1];
+    topItems.forEach(([name, count], idx) => {
+      if (y > 272) { doc.addPage(); y = 20; }
+      if (idx%2===0) { doc.setFillColor(255,252,245); doc.rect(M, y-1, CW, 9, 'F'); }
+      doc.setDrawColor(...border); doc.setLineWidth(0.15); doc.line(M, y+7.5, W-M, y+7.5);
+      // Rang coloré si top 3
+      const rankCol = idx===0?[249,115,22]:idx===1?[100,116,139]:idx===2?[180,140,80]:dark;
+      doc.setFont('helvetica','bold'); doc.setFontSize(8.5); doc.setTextColor(...rankCol);
+      doc.text(`${idx+1}`, M+3, y+5.5);
+      doc.setFont('helvetica','normal'); doc.setTextColor(...dark);
+      const n = String(name); doc.text(n.length>42?n.slice(0,42)+'…':n, M+14, y+5.5);
+      // Mini barre
+      const bw = Math.max(1, (count/maxItem)*28);
+      doc.setFillColor(...orange); doc.roundedRect(W-M-38, y+2, bw, 4, 0.5, 0.5, 'F');
+      doc.setFont('helvetica','bold'); doc.setTextColor(...orange);
+      doc.text(`${fmtN(count)}x`, W-M-4, y+5.5, { align:'right' });
+      y += 9;
+    });
+  }
+
+  footer();
+  doc.save(`rapport-restaurant-${freq}-${new Date().toISOString().slice(0,10)}.pdf`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -505,13 +793,11 @@ async function saveItem() {
 }
 
 async function deleteItem(id) {
-  confirm2('Supprimer cet article ?', async () => {
-    try {
-      await api('DELETE', `/api/restaurant/menu/items/${id}`);
-      toast('Article supprimé', 'success');
-      loadMenus();
-    } catch (e) { toast(e.message, 'error'); }
-  });
+  try {
+    await api('DELETE', `/api/restaurant/menu/items/${id}`);
+    toast('Article supprimé', 'success');
+    loadMenus();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -520,56 +806,89 @@ async function deleteItem(id) {
 
 async function loadClientele() {
   try {
-    const [clients, orders, subs, enterprises] = await Promise.all([
+    const [clients, orders, subs, enterprises, invoices] = await Promise.all([
       api('GET', '/api/restaurant/clientele'),
       api('GET', '/api/orders'),
       api('GET', '/api/subscriptions'),
       api('GET', '/api/restaurant/enterprises'),
+      api('GET', '/api/invoices'),
     ]);
 
-    // Clientèle affiliée
-    el('clientele-list').innerHTML = clients.length
-      ? clients.map(c => `
-          <div class="client-card">
-            <div>
-              <strong>${esc(c.companyName)}</strong>
-              ${c.location ? `<a href="${esc(c.location)}" target="_blank" class="map-link">📍 Maps</a>` : ''}
+    const invoiceByOrder = {};
+    invoices.forEach(i => { invoiceByOrder[i.orderId] = i; });
+
+    // Grouper commandes par entreprise
+    const byEnt = {};
+    orders.forEach(o => {
+      if (!byEnt[o.enterpriseId]) byEnt[o.enterpriseId] = { name: o.enterpriseName, orders: [] };
+      byEnt[o.enterpriseId].orders.push(o);
+    });
+    // Ajouter les affiliés sans commandes
+    clients.forEach(c => {
+      if (!byEnt[c.id]) byEnt[c.id] = { name: c.companyName, orders: [], todayChoices: c.todayChoices || [] };
+      else byEnt[c.id].todayChoices = c.todayChoices || [];
+    });
+
+    const statusBtns = o => {
+      const inv = invoiceByOrder[o.id];
+      const actions = [];
+      if (o.status === 'pending')   actions.push(`<button class="btn primary sm" onclick="updateOrderStatus('${o.id}','confirmed')">✅ Accuser réception</button>`);
+      if (o.status === 'confirmed') actions.push(`<button class="btn ghost sm" onclick="updateOrderStatus('${o.id}','preparing')">🍳 En préparation</button>`);
+      if (['confirmed','preparing'].includes(o.status)) actions.push(`<button class="btn success sm" onclick="updateOrderStatus('${o.id}','delivered')">🚚 Livrée</button>`);
+      if (!inv && o.status !== 'pending') actions.push(`<button class="btn primary sm" onclick="createInvoice('${o.id}')">🧾 Faire la facture</button>`);
+      if (inv) actions.push(`<button class="btn outline sm" onclick="downloadInvoice('${inv.id}')">⬇ Facture (${inv.status})</button>`);
+      return actions.join('');
+    };
+
+    el('clientele-list').innerHTML = Object.values(byEnt).length
+      ? Object.values(byEnt).map(g => `
+          <div class="enterprise-group">
+            <div class="group-header">
+              <strong>🏢 ${esc(g.name)}</strong>
+              <span class="badge">${(g.todayChoices||[]).length} choix aujourd'hui</span>
             </div>
-            <span class="badge">${c.todayChoices?.length || 0} choix aujourd'hui</span>
+            ${g.orders.length ? `
+            <table class="choice-table" style="margin-top:10px">
+              <thead><tr><th>Date</th><th>Repas</th><th>Total</th><th>Statut</th><th>Actions</th></tr></thead>
+              <tbody>${g.orders.map(o => `<tr>
+                <td>${fmtDateTime(o.createdAt)}</td>
+                <td>${o.items?.length||0} repas</td>
+                <td>${fmtPrice(o.totalAmount)}</td>
+                <td><span class="badge ${o.status}">${o.status}</span></td>
+                <td class="order-btns">${statusBtns(o)}</td>
+              </tr>`).join('')}</tbody>
+            </table>` : '<p class="empty" style="margin:6px 0">Aucune commande pour cette entreprise.</p>'}
           </div>`).join('')
       : '<p class="empty">Aucune entreprise affiliée.</p>';
 
-    // Commandes
-    el('rst-orders-list').innerHTML = orders.length
-      ? orders.map(o => `
-          <div class="order-card">
-            <div>
-              <strong>${esc(o.enterpriseName)}</strong> — ${fmtDateTime(o.createdAt)}
-              <span class="badge ${o.status}">${o.status}</span>
-            </div>
-            <div>${fmtPrice(o.totalAmount)} · ${o.paymentMode === 'upfront' ? '💳 Mobile' : '🚚 Livraison'}</div>
-            <div class="order-btns">
-              ${['confirmed','preparing','delivered'].map(s =>
-                `<button class="btn ghost sm" onclick="updateOrderStatus('${o.id}','${s}')">${s}</button>`
-              ).join('')}
-            </div>
-          </div>`).join('')
-      : '<p class="empty">Aucune commande.</p>';
-
     // Abonnements
+    const freqLabels = { weekly: 'Hebdomadaire', monthly: 'Mensuel', quarterly: 'Trimestriel', 'semi-annual': 'Semestriel', annual: 'Annuel' };
+    const statusLabels = { pending: 'En attente', accepted: 'Actif', declined: 'Refusé' };
     el('rst-subs-list').innerHTML = subs.length
-      ? subs.map(s => `
+      ? subs.map(s => {
+          const hasSubInvoice = invoices.some(i => i.subscriptionId === s.id);
+          return `
           <div class="sub-card">
-            <span>${esc(s.enterpriseName)} — <em>${s.frequency}</em> — <span class="badge ${s.status}">${s.status}</span></span>
+            <div>
+              <span><strong>${esc(s.enterpriseName)}</strong> — <em>${freqLabels[s.frequency] || s.frequency}</em></span>
+              <span class="badge ${s.status}">${statusLabels[s.status] || s.status}</span>
+            </div>
             ${s.status === 'pending' ? `
-              <div>
+              <div class="sub-btns">
                 <button class="btn primary sm" onclick="respondSub('${s.id}','accepted')">✓ Accepter</button>
                 <button class="btn danger sm"  onclick="respondSub('${s.id}','declined')">✕ Refuser</button>
               </div>` : ''}
-          </div>`).join('')
-      : '<p class="empty">Aucune demande.</p>';
+            ${s.status === 'accepted' ? `
+              <div class="sub-btns">
+                ${hasSubInvoice
+                  ? '<span class="badge success">✅ Facture envoyée</span>'
+                  : `<button class="btn primary sm" onclick="createSubInvoice('${s.id}')">🧾 Générer la facture</button>`}
+              </div>` : ''}
+          </div>`;
+        }).join('')
+      : '<p class="empty">Aucune demande d\'abonnement.</p>';
 
-    // Offrir services
+    // Proposer services
     el('rst-enterprises-list').innerHTML = enterprises.map(e => `
       <div class="ent-row">
         <span>${esc(e.companyName)}</span>
@@ -577,9 +896,40 @@ async function loadClientele() {
         ${!e.hasOffer && !e.isAffiliated
           ? `<button class="btn primary sm" onclick="offerService('${e.id}')">📤 Proposer</button>`
           : e.hasOffer && !e.isAffiliated
-          ? `<button class="btn ghost sm" onclick="withdrawOffer('${e.id}')">Retirer l'offre</button>`
+          ? `<button class="btn outline sm" onclick="withdrawOffer('${e.id}')">Retirer l'offre</button>`
           : ''}
       </div>`).join('') || '<p class="empty">Aucune entreprise.</p>';
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// Créer une facture pour une commande (restaurant)
+async function createInvoice(orderId) {
+  try {
+    await api('POST', '/api/invoices', { orderId });
+    toast('Facture générée et envoyée !', 'success');
+    loadClientele();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// Créer une facture globale pour un abonnement (restaurant)
+async function createSubInvoice(subId) {
+  try {
+    await api('POST', `/api/subscriptions/${subId}/invoice`);
+    toast('Facture d\'abonnement générée et envoyée !', 'success');
+    loadClientele();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// Télécharger une facture (restaurant)
+async function downloadInvoice(invoiceId) {
+  try {
+    const res = await fetch(`/api/invoices/${invoiceId}/pdf`, { headers: { 'Authorization': 'Bearer ' + token } });
+    if (!res.ok) { toast('PDF non disponible', 'error'); return; }
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `facture-${invoiceId.slice(0,8)}.pdf`;
+    a.click();
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -626,7 +976,8 @@ async function openProfileModal() {
     el('prof-fname').value = r.fullName || '';
     el('prof-phone').value = r.phone || '';
     el('prof-addr').value  = r.address || '';
-    el('prof-spec').value  = r.specialty || '';
+    const spec = Array.isArray(r.specialty) ? r.specialty : (r.specialty ? [r.specialty] : []);
+    renderSpecialtyCheckboxes('prof-spec-container', spec);
     el('prof-desc').value  = r.description || '';
     el('prof-oldpwd').value = '';
     el('prof-newpwd').value = '';
@@ -676,7 +1027,7 @@ async function saveProfile() {
     fullName:       el('prof-fname').value.trim(),
     phone:          el('prof-phone').value.trim(),
     address:        el('prof-addr').value.trim(),
-    specialty:      el('prof-spec').value.trim(),
+    specialty:      collectSpecialties('prof-spec-container'),
     description:    el('prof-desc').value.trim(),
     paymentInfo:    collectPayEntries('prof-pay-entries'),
     photo:          _profilePhotoData || '',
@@ -698,15 +1049,20 @@ async function saveProfile() {
 
 async function loadEntToday() {
   try {
-    const [choices, affiliated] = await Promise.all([
+    const [choices, affiliated, orders] = await Promise.all([
       api('GET', '/api/choices/today'),
       api('GET', '/api/enterprise/restaurants'),
+      api('GET', '/api/orders'),
     ]);
 
     if (!affiliated.length) {
       el('ent-today-content').innerHTML = '<p class="empty">Aucun restaurant affilié. Affiliez-vous dans l\'onglet Restaurants.</p>';
       return;
     }
+
+    // Commandes déjà lancées aujourd'hui
+    const today = todayStr();
+    const orderedToday = new Set(orders.filter(o => o.date === today).map(o => o.restaurantId));
 
     // Group choices by restaurant
     const byResto = {};
@@ -730,7 +1086,9 @@ async function loadEntToday() {
           <div class="group-header">
             <h4>🍴 ${esc(g.name)}</h4>
             <span>Total: ${fmtPrice(total)}</span>
-            <button class="btn primary sm" onclick="openOrderModal('${g.choices[0].restaurantId}')">📦 Commander</button>
+            ${orderedToday.has(g.choices[0].restaurantId)
+              ? '<span class="badge success">✓ Commandé</span>'
+              : `<button class="btn primary sm" onclick="launchOrder('${g.choices[0].restaurantId}')">🚀 Lancer la commande</button>`}
           </div>
           <table class="choice-table">
             <thead><tr><th>Employé</th><th>Plat</th><th>Boisson</th><th>Montant</th></tr></thead>
@@ -757,7 +1115,7 @@ async function downloadOrdersPDF() {
   try {
     const today = new Date().toISOString().split('T')[0];
     const res = await fetch('/api/stats/pdf/orders', {
-      headers: { 'Authorization': 'Bearer ' + _token }
+      headers: { 'Authorization': 'Bearer ' + token }
     });
     if (!res.ok) { toast('Erreur lors de la génération du PDF', 'error'); return; }
     const blob = await res.blob();
@@ -770,37 +1128,10 @@ async function downloadOrdersPDF() {
   } catch (e) { toast(e.message, 'error'); }
 }
 
-function openOrderModal(restaurantId) {
-  _orderRestaurantId = restaurantId;
-  el('modal-order-body').innerHTML = `
-    <p>Mode de paiement :</p>
-    <label class="radio-row"><input type="radio" name="paymode" value="delivery" checked> 🚚 Livraison (paiement à la livraison)</label>
-    <label class="radio-row"><input type="radio" name="paymode" value="upfront"> 💳 Mobile Money (paiement à l'avance)</label>
-    <div id="upfront-section" class="hidden" style="margin-top:12px">
-      <div class="field-label">Type de paiement</div>
-      <input id="dep-type" type="text" placeholder="Ex: OM, Wave…"/>
-      <div class="field-label">Capture du dépôt (base64 ou URL)</div>
-      <input id="dep-screenshot" type="text" placeholder="Optionnel"/>
-    </div>`;
-  document.querySelectorAll('input[name="paymode"]').forEach(r => {
-    r.addEventListener('change', () => {
-      el('upfront-section').classList.toggle('hidden', r.value !== 'upfront');
-    });
-  });
-  openModal('modal-order');
-}
-
-async function submitOrder() {
-  const paymentMode = document.querySelector('input[name="paymode"]:checked')?.value;
-  const body = { restaurantId: _orderRestaurantId, paymentMode };
-  if (paymentMode === 'upfront') {
-    body.depositType       = el('dep-type')?.value.trim();
-    body.depositScreenshot = el('dep-screenshot')?.value.trim();
-  }
+async function launchOrder(restaurantId) {
   try {
-    await api('POST', '/api/orders', body);
-    closeModal('modal-order');
-    toast('Commande envoyée !', 'success');
+    await api('POST', '/api/orders', { restaurantId });
+    toast('Commande lancée ! Le restaurant a été notifié.', 'success');
     loadEntToday();
   } catch (e) { toast(e.message, 'error'); }
 }
@@ -820,34 +1151,48 @@ async function switchRestoTab(mode) {
   el('seg-all').classList.toggle('active', mode === 'all');
   el('seg-aff').classList.toggle('active', mode === 'affiliated');
   try {
-    const [all, affiliated] = await Promise.all([
+    const [all, affiliated, mySubs] = await Promise.all([
       api('GET', '/api/restaurants'),
       api('GET', '/api/enterprise/restaurants'),
+      api('GET', '/api/subscriptions'),
     ]);
     const affIds = new Set(affiliated.map(r => r.id));
     const list   = mode === 'all' ? all : affiliated;
 
+    // Indexer les abonnements par restaurantId
+    const subByResto = {};
+    mySubs.forEach(s => { subByResto[s.restaurantId] = s; });
+
+    const subStatusLabel = { pending: '⏳ Abonnement en attente', accepted: '✅ Abonnement actif', declined: '❌ Abonnement refusé' };
+    const subStatusClass = { pending: 'warning', accepted: 'success', declined: 'danger' };
+
     el('ent-restaurants-list').innerHTML = list.length
-      ? list.map(r => `
+      ? list.map(r => {
+          const sub = subByResto[r.id];
+          return `
           <div class="resto-card">
             ${r.photo ? `<img src="${esc(r.photo)}" class="resto-thumb"/>` : '<div class="resto-thumb-ph">🍴</div>'}
             <div class="resto-info">
               <h4>${esc(r.restaurantName)}</h4>
-              ${r.specialty ? `<p>${esc(r.specialty)}</p>` : ''}
+              ${r.specialty?.length ? `<p>${esc(Array.isArray(r.specialty)?r.specialty.join(', '):r.specialty)}</p>` : ''}
               ${r.address   ? `<p>📍 ${esc(r.address)}</p>` : ''}
               ${r.phone     ? `<p>📞 ${esc(r.phone)}</p>` : ''}
               ${affIds.has(r.id) && r.dailyMenu
                 ? `<p class="daily-preview">Menu du jour : ${[...r.dailyMenu.foods, ...r.dailyMenu.drinks].map(i => esc(i.name)).join(', ') || 'Non défini'}</p>`
                 : ''}
+              ${sub ? `<p><span class="badge ${subStatusClass[sub.status]||''}">${subStatusLabel[sub.status]||sub.status}</span> <em>(${sub.frequency})</em></p>` : ''}
             </div>
             <div class="resto-actions">
               ${affIds.has(r.id)
                 ? `<span class="badge success">Affilié</span>
                    <button class="btn ghost sm" onclick="disaffiliate('${r.id}')">Se désaffilier</button>
-                   <button class="btn primary sm" onclick="openSubModal('${r.id}','${esc(r.restaurantName)}')">📅 Abonnement</button>`
+                   ${!sub || sub.status === 'declined'
+                     ? `<button class="btn primary sm" onclick="openSubModal('${r.id}','${esc(r.restaurantName)}')">📅 Abonnement</button>`
+                     : ''}`
                 : `<button class="btn primary sm" onclick="affiliate('${r.id}')">+ S'affilier</button>`}
             </div>
-          </div>`).join('')
+          </div>`;
+        }).join('')
       : '<p class="empty">Aucun restaurant.</p>';
   } catch (e) { toast(e.message, 'error'); }
 }
@@ -861,13 +1206,11 @@ async function affiliate(restaurantId) {
 }
 
 async function disaffiliate(restaurantId) {
-  confirm2('Se désaffilier de ce restaurant ?', async () => {
-    try {
-      await api('DELETE', `/api/enterprise/restaurants/${restaurantId}/affiliate`);
-      toast('Désaffilié', 'success');
-      loadEntRestaurants();
-    } catch (e) { toast(e.message, 'error'); }
-  });
+  try {
+    await api('DELETE', `/api/enterprise/restaurants/${restaurantId}/affiliate`);
+    toast('Désaffilié', 'success');
+    loadEntRestaurants();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 function openSubModal(restaurantId, name) {
@@ -984,13 +1327,11 @@ async function saveEmployee() {
 }
 
 async function deleteEmployee(id) {
-  confirm2('Supprimer cet employé ?', async () => {
-    try {
-      await api('DELETE', `/api/enterprise/employees/${id}`);
-      toast('Employé supprimé', 'success');
-      loadEntEmployees();
-    } catch (e) { toast(e.message, 'error'); }
-  });
+  try {
+    await api('DELETE', `/api/enterprise/employees/${id}`);
+    toast('Employé supprimé', 'success');
+    loadEntEmployees();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 async function loadEntOrders() {
@@ -1005,6 +1346,34 @@ async function loadEntOrders() {
             <div>${fmtPrice(o.totalAmount)} · ${o.items?.length || 0} repas</div>
           </div>`).join('')
       : '<p class="empty">Aucune commande.</p>';
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function loadEntInvoices() {
+  try {
+    const invoices = await api('GET', '/api/invoices');
+    el('ent-invoices-list').innerHTML = invoices.length
+      ? invoices.map(inv => `
+          <div class="order-card invoice-card">
+            <div>
+              <strong>${esc(inv.restaurantName)}</strong> — ${fmtDateTime(inv.createdAt)}
+              <span class="badge ${inv.status}">${inv.status === 'sent' ? '📨 Reçue' : inv.status === 'confirmed' ? '✅ Confirmée' : inv.status}</span>
+            </div>
+            <div>${inv.number} · ${fmtPrice(inv.totalAmount)} · ${inv.items?.length||0} article(s)</div>
+            <div class="order-btns">
+              <button class="btn ghost sm" onclick="downloadInvoice('${inv.id}')">⬇ PDF</button>
+              ${inv.status === 'sent' ? `<button class="btn primary sm" onclick="confirmInvoice('${inv.id}')">✅ Confirmer réception</button>` : ''}
+            </div>
+          </div>`).join('')
+      : '<p class="empty">Aucune facture.</p>';
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function confirmInvoice(invoiceId) {
+  try {
+    await api('PUT', `/api/invoices/${invoiceId}/confirm`);
+    toast('Réception confirmée !', 'success');
+    loadEntInvoices();
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -1028,12 +1397,159 @@ async function loadEntStats() {
   } catch (e) { toast(e.message, 'error'); }
 }
 
-function pdfEntStats() {
+async function pdfEntStats() {
+  // ── Données ──────────────────────────────────────────────────────────────
+  const freq = el('ent-freq')?.value || 'monthly';
+  const freqLabels = { daily: "Aujourd'hui", weekly: '7 derniers jours', monthly: 'Ce mois', quarterly: 'Ce trimestre' };
+  let s;
+  try { s = await api('GET', `/api/stats/enterprise?frequency=${freq}`); }
+  catch(e) { toast('Impossible de charger les données', 'error'); return; }
+
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-  doc.text('Statistiques Entreprise — LunchApp', 14, 16);
-  doc.text(el('ent-stats-content').innerText, 14, 30);
-  doc.save('stats-entreprise.pdf');
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const W = 210, M = 14, CW = W - 2 * M;
+  const navy=[15,23,42], blue=[14,165,233], orange=[249,115,22], green=[34,197,94];
+  const light=[241,245,249], border=[226,232,240], dark=[30,41,59], gray=[100,116,139], white=[255,255,255];
+  const fmtN = n => Number(n||0).toLocaleString('fr-FR');
+  const fmtP = n => Number(n||0).toLocaleString('fr-FR') + ' FCFA';
+
+  function footer() {
+    const t = doc.getNumberOfPages();
+    for (let p = 1; p <= t; p++) {
+      doc.setPage(p);
+      doc.setFillColor(...navy); doc.rect(0, 285, W, 12, 'F');
+      doc.setFillColor(...blue); doc.rect(0, 285, 5, 12, 'F');
+      doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...gray);
+      doc.text('LunchApp — Rapport de consommation entreprise', M+5, 292);
+      doc.text(`Page ${p} / ${t}`, W-M, 292, { align:'right' });
+    }
+  }
+
+  const cName = (me && me.companyName) || 'Entreprise';
+  const dateStr = new Date().toLocaleDateString('fr-FR', { day:'2-digit', month:'long', year:'numeric' });
+  const empStats = (s.employeeStats || []).sort((a,b) => b.choicesCount - a.choicesCount);
+  const totalEmp = empStats.length;
+  const actifs   = empStats.filter(e => e.choicesCount > 0).length;
+  const tauxPart = totalEmp ? Math.round(actifs / totalEmp * 100) : 0;
+
+  // ── HEADER ──────────────────────────────────────────────────────────────
+  doc.setFillColor(...navy); doc.rect(0, 0, W, 50, 'F');
+  doc.setFillColor(...blue); doc.rect(0, 0, 5, 50, 'F');
+  doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(...blue);
+  doc.text('LUNCHAPP — RAPPORT DE CONSOMMATION', M+5, 11);
+  doc.setFont('helvetica','bold'); doc.setFontSize(20); doc.setTextColor(...white);
+  doc.text(cName, M+5, 26);
+  doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(148,163,184);
+  doc.text(`Periode : ${freqLabels[freq]||freq}   |   Genere le : ${dateStr}`, M+5, 39);
+  // Badge taux participation
+  doc.setFillColor(...blue); doc.roundedRect(W-M-26, 11, 26, 16, 3, 3, 'F');
+  doc.setFont('helvetica','bold'); doc.setFontSize(14); doc.setTextColor(...white);
+  doc.text(`${tauxPart}%`, W-M-13, 22, { align:'center' });
+  doc.setFont('helvetica','normal'); doc.setFontSize(6.5); doc.setTextColor(180,220,255);
+  doc.text('participation', W-M-13, 27, { align:'center' });
+
+  let y = 60;
+
+  // ── 4 KPI CARDS ──────────────────────────────────────────────────────────
+  const cw4 = (CW - 3*5) / 4;
+  [
+    [fmtN(totalEmp),        'Employes',     blue],
+    [fmtN(actifs),          'Actifs',       green],
+    [fmtN(s.totalChoices),  'Total choix',  orange],
+    [fmtP(s.totalBudget),   'Budget total', navy],
+  ].forEach(([val, lbl, col], i) => {
+    const cx = M + i*(cw4+5);
+    doc.setFillColor(...light); doc.roundedRect(cx, y, cw4, 22, 2, 2, 'F');
+    doc.setFillColor(...col); doc.roundedRect(cx, y, cw4, 3.5, 2, 2, 'F'); doc.rect(cx, y+1.5, cw4, 2, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(i===3?7:13); doc.setTextColor(...col);
+    doc.text(val, cx+cw4/2, y+14, { align:'center', maxWidth: cw4-2 });
+    doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(...gray);
+    doc.text(lbl, cx+cw4/2, y+19, { align:'center' });
+  });
+  y += 30;
+
+  // ── TABLEAU EMPLOYES ─────────────────────────────────────────────────────
+  if (empStats.length) {
+    doc.setFillColor(...blue); doc.roundedRect(M, y, CW, 11, 2, 2, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...white);
+    doc.text('Detail de consommation par employe', M+5, y+7.5);
+    y += 14;
+
+    // En-têtes colonnes
+    const colX = [M+4, M+62, M+84, M+110, M+140];
+    const colHeaders = ['NOM', 'GENRE', 'CHOIX', 'PARTICIPATION', 'STATUT'];
+    doc.setFillColor(...border); doc.rect(M, y, CW, 7, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(7); doc.setTextColor(...gray);
+    colHeaders.forEach((h, i) => doc.text(h, colX[i], y+5));
+    y += 9;
+
+    const maxChoix = empStats.length ? Math.max(...empStats.map(e => e.choicesCount), 1) : 1;
+    empStats.forEach((emp, idx) => {
+      if (y > 272) { doc.addPage(); y = 20; }
+      if (idx%2===0) { doc.setFillColor(248,251,255); doc.rect(M, y-1, CW, 9, 'F'); }
+      doc.setDrawColor(...border); doc.setLineWidth(0.15); doc.line(M, y+7.5, W-M, y+7.5);
+
+      const pct = totalEmp ? Math.round(emp.choicesCount / (s.totalChoices||1) * 100) : 0;
+      const actif = emp.choicesCount > 0;
+
+      doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(...dark);
+      const n = emp.fullName||''; doc.text(n.length>22?n.slice(0,22)+'…':n, colX[0], y+5.5);
+      doc.text(emp.gender==='male'?'Homme':'Femme', colX[1], y+5.5);
+      doc.setFont('helvetica','bold'); doc.setTextColor(...blue);
+      doc.text(fmtN(emp.choicesCount)+'x', colX[2], y+5.5);
+      // Mini barre participation
+      const bw = Math.max(1, (emp.choicesCount/maxChoix)*22);
+      doc.setFillColor(...border); doc.roundedRect(colX[3], y+2, 22, 4, 0.5, 0.5, 'F');
+      doc.setFillColor(...blue); doc.roundedRect(colX[3], y+2, bw, 4, 0.5, 0.5, 'F');
+      doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...gray);
+      doc.text(`${pct}%`, colX[3]+24, y+5.5);
+      // Statut badge
+      doc.setFont('helvetica','bold'); doc.setFontSize(7.5);
+      doc.setTextColor(...(actif ? [34,197,94] : [239,68,68]));
+      doc.text(actif?'Actif':'Inactif', colX[4], y+5.5);
+      y += 9;
+    });
+    y += 10;
+  }
+
+  // ── PREFERENCES ALIMENTAIRES ──────────────────────────────────────────────
+  const topFoods  = Object.entries(s.foodCounts ||{}).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  const topDrinks = Object.entries(s.drinkCounts||{}).sort((a,b)=>b[1]-a[1]).slice(0,6);
+
+  if (topFoods.length || topDrinks.length) {
+    if (y + 60 > 272) { doc.addPage(); y = 20; }
+    const halfW = (CW - 6) / 2;
+
+    // Titre section
+    doc.setFillColor(...orange); doc.roundedRect(M, y, CW, 11, 2, 2, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...white);
+    doc.text('Preferences alimentaires', M+5, y+7.5);
+    y += 15;
+
+    // Plats (gauche) & Boissons (droite)
+    [[topFoods,'Plats populaires',blue],[topDrinks,'Boissons populaires',green]].forEach(([items, title, col], col_i) => {
+      const cx = M + col_i*(halfW+6);
+      doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(...col);
+      doc.text(title, cx, y+5);
+      let ly = y + 10;
+      if (!items.length) {
+        doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...gray);
+        doc.text('Aucune donnee', cx, ly+4);
+      }
+      items.forEach(([name, cnt]) => {
+        doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...dark);
+        const n = String(name); doc.text((n.length>20?n.slice(0,20)+'…':n), cx, ly+4);
+        doc.setFont('helvetica','bold'); doc.setTextColor(...col);
+        doc.text(`${fmtN(cnt)}x`, cx+halfW-2, ly+4, { align:'right' });
+        doc.setDrawColor(...border); doc.setLineWidth(0.1); doc.line(cx, ly+6, cx+halfW-2, ly+6);
+        ly += 9;
+      });
+    });
+    y += 10 + Math.max(topFoods.length, topDrinks.length) * 9 + 6;
+  }
+
+  footer();
+  doc.save(`rapport-entreprise-${freq}-${new Date().toISOString().slice(0,10)}.pdf`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1190,13 +1706,11 @@ async function confirmChoice() {
 }
 
 async function deleteMyChoice(choiceId) {
-  confirm2('Supprimer votre choix ?', async () => {
-    try {
-      await api('DELETE', `/api/choices/${choiceId}`);
-      toast('Choix supprimé', 'success');
-      loadEmpMenu();
-    } catch (e) { toast(e.message, 'error'); }
-  });
+  try {
+    await api('DELETE', `/api/choices/${choiceId}`);
+    toast('Choix supprimé', 'success');
+    loadEmpMenu();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 // Rating
@@ -1252,14 +1766,12 @@ async function loadEmpHistory() {
   } catch (e) { toast(e.message, 'error'); }
 }
 
-function clearHistory() {
-  confirm2('Vider votre historique (sauf aujourd\'hui) ?', async () => {
-    try {
-      await api('DELETE', '/api/choices/history');
-      toast('Historique vidé', 'success');
-      loadEmpHistory();
-    } catch (e) { toast(e.message, 'error'); }
-  });
+async function clearHistory() {
+  try {
+    await api('DELETE', '/api/choices/history');
+    toast('Historique vidé', 'success');
+    loadEmpHistory();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1277,15 +1789,35 @@ async function loadAdminStats() {
       case 'ov': {
         const s = await api('GET', `/api/admin/stats?frequency=${freq}`);
         el('admin-content').innerHTML = `
-          <div class="stats-grid">
-            <div class="stat-card"><div class="stat-num">${s.counts.enterprises}</div><div class="stat-lbl">Entreprises</div></div>
-            <div class="stat-card"><div class="stat-num">${s.counts.restaurants}</div><div class="stat-lbl">Restaurants</div></div>
-            <div class="stat-card"><div class="stat-num">${s.counts.employees}</div><div class="stat-lbl">Employés</div></div>
-            <div class="stat-card"><div class="stat-num">${fmtPrice(s.totalMobilized)}</div><div class="stat-lbl">Total mobilisé</div></div>
+          <div class="kpi-grid">
+            <div class="kpi-card blue">
+              <div class="kpi-icon">🏢</div>
+              <div class="kpi-body"><div class="kpi-num">${s.counts.enterprises}</div><div class="kpi-lbl">Entreprises</div></div>
+            </div>
+            <div class="kpi-card green">
+              <div class="kpi-icon">🍴</div>
+              <div class="kpi-body"><div class="kpi-num">${s.counts.restaurants}</div><div class="kpi-lbl">Restaurants</div></div>
+            </div>
+            <div class="kpi-card yellow">
+              <div class="kpi-icon">👤</div>
+              <div class="kpi-body"><div class="kpi-num">${s.counts.employees}</div><div class="kpi-lbl">Employés</div></div>
+            </div>
+            <div class="kpi-card purple">
+              <div class="kpi-icon">💎</div>
+              <div class="kpi-body"><div class="kpi-num">${fmtPrice(s.totalMobilized)}</div><div class="kpi-lbl">Total mobilisé</div></div>
+            </div>
           </div>
-          <p>👨 ${s.gender.male} hommes · 👩 ${s.gender.female} femmes</p>
-          ${Object.keys(s.restaurantRevenue||{}).length ? `<h4>Recettes par restaurant</h4><ul class="item-list">${Object.entries(s.restaurantRevenue).map(([n,v])=>`<li>${esc(n)}: ${fmtPrice(v)}</li>`).join('')}</ul>` : ''}
-          ${Object.keys(s.enterpriseBudget||{}).length ? `<h4>Budget par entreprise</h4><ul class="item-list">${Object.entries(s.enterpriseBudget).map(([n,v])=>`<li>${esc(n)}: ${fmtPrice(v)}</li>`).join('')}</ul>` : ''}`;
+          <p style="color:var(--gray);font-size:13px;margin-bottom:16px">👨 ${s.gender.male} hommes · 👩 ${s.gender.female} femmes</p>
+          ${Object.keys(s.restaurantRevenue||{}).length ? `
+          <div class="section-header">
+            <div class="section-icon">🍴</div><h3>Recettes par restaurant</h3>
+          </div>
+          <ul class="item-list">${Object.entries(s.restaurantRevenue).map(([n,v])=>`<li>${esc(n)}<span class="badge green">${fmtPrice(v)}</span></li>`).join('')}</ul>` : ''}
+          ${Object.keys(s.enterpriseBudget||{}).length ? `
+          <div class="section-header" style="margin-top:16px">
+            <div class="section-icon">🏢</div><h3>Budget par entreprise</h3>
+          </div>
+          <ul class="item-list">${Object.entries(s.enterpriseBudget).map(([n,v])=>`<li>${esc(n)}<span class="badge blue">${fmtPrice(v)}</span></li>`).join('')}</ul>` : ''}`;
         break;
       }
       case 'ent': {
@@ -1375,21 +1907,247 @@ function adminTab(tab, btn) {
 }
 
 async function adminDelete(type, id) {
-  confirm2(`Supprimer ce ${type} définitivement ?`, async () => {
-    try {
-      await api('DELETE', `/api/admin/users/${type}/${id}`);
-      toast('Supprimé', 'success');
+  try {
+    await api('DELETE', `/api/admin/users/${type}/${id}`);
+    toast('Supprimé', 'success');
       loadAdminStats();
-    } catch (e) { toast(e.message, 'error'); }
-  });
+  } catch (e) { toast(e.message, 'error'); }
 }
 
-function pdfAdminStats() {
+async function pdfAdminStats() {
+  const freq = el('adm-freq')?.value || 'monthly';
+  const tab  = _adminTab || 'ov';
+  const freqLabels = { daily:"Aujourd'hui", weekly:'7 derniers jours', monthly:'Ce mois', quarterly:'Ce trimestre' };
+  const tabTitles  = { ov:'Tableau de bord', ent:'Liste des entreprises', rst:'Liste des restaurants', emp:'Liste des employes', del:'Demandes de suppression' };
+  const dateStr = new Date().toLocaleDateString('fr-FR', { day:'2-digit', month:'long', year:'numeric' });
+
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-  doc.text('Statistiques Admin — LunchApp', 14, 16);
-  doc.text(el('admin-content').innerText.slice(0, 2000), 14, 30);
-  doc.save('stats-admin.pdf');
+  const doc = new jsPDF({ unit:'mm', format:'a4' });
+  const W=210, M=14, CW=W-2*M;
+  const navy=[15,23,42], blue=[14,165,233], orange=[249,115,22], green=[34,197,94], purple=[139,92,246];
+  const light=[241,245,249], border=[226,232,240], dark=[30,41,59], gray=[100,116,139], white=[255,255,255];
+  const fmtN = n => Number(n||0).toLocaleString('fr-FR');
+  const fmtP = n => Number(n||0).toLocaleString('fr-FR') + ' FCFA';
+  const fmtD = iso => iso ? new Date(iso).toLocaleDateString('fr-FR') : '—';
+  const clip = (s, n) => { const t=String(s||''); return t.length>n?t.slice(0,n)+'…':t; };
+
+  function drawHeader(accentColor) {
+    doc.setFillColor(...navy); doc.rect(0, 0, W, 50, 'F');
+    doc.setFillColor(...accentColor); doc.rect(0, 0, 5, 50, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(...accentColor);
+    doc.text('LUNCHAPP — ADMINISTRATION', M+5, 11);
+    doc.setFont('helvetica','bold'); doc.setFontSize(20); doc.setTextColor(...white);
+    doc.text(tabTitles[tab]||'Rapport', M+5, 26);
+    doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(148,163,184);
+    const periodPart = tab==='ov' ? `Periode : ${freqLabels[freq]||freq}   |   ` : '';
+    doc.text(`${periodPart}Genere le : ${dateStr}`, M+5, 39);
+  }
+
+  function drawFooter(accentColor) {
+    const t = doc.getNumberOfPages();
+    for (let p=1; p<=t; p++) {
+      doc.setPage(p);
+      doc.setFillColor(...navy); doc.rect(0, 285, W, 12, 'F');
+      doc.setFillColor(...accentColor); doc.rect(0, 285, 5, 12, 'F');
+      doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...gray);
+      doc.text(`LunchApp — ${tabTitles[tab]||'Rapport admin'}`, M+5, 292);
+      doc.text(`Page ${p} / ${t}`, W-M, 292, { align:'right' });
+    }
+  }
+
+  function drawMoneyTable(title, entries, hdrColor) {
+    if (!entries.length) return;
+    if (y + 25 + entries.length*9 > 272) { doc.addPage(); y=20; }
+    doc.setFillColor(...hdrColor); doc.roundedRect(M, y, CW, 11, 2, 2, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...white);
+    doc.text(title, M+5, y+7.5); y+=14;
+    doc.setFillColor(...border); doc.rect(M, y, CW, 7, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(7.5); doc.setTextColor(...gray);
+    doc.text('NOM', M+4, y+5); doc.text('MONTANT', W-M-4, y+5, { align:'right' }); y+=9;
+    entries.forEach(([name, val], idx) => {
+      if (y>272) { doc.addPage(); y=20; }
+      if (idx%2===0) { doc.setFillColor(250,252,255); doc.rect(M, y-1, CW, 9, 'F'); }
+      doc.setDrawColor(...border); doc.setLineWidth(0.15); doc.line(M, y+7.5, W-M, y+7.5);
+      doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(...dark);
+      doc.text(clip(name,40), M+4, y+5.5);
+      doc.setFont('helvetica','bold'); doc.setTextColor(...hdrColor);
+      doc.text(fmtP(val), W-M-4, y+5.5, { align:'right' }); y+=9;
+    }); y+=10;
+  }
+
+  function drawListTable(columns, rows, hdrColor) {
+    // columns = [{label, x, w, key}]
+    if (!rows.length) {
+      doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...gray);
+      doc.text('Aucune donnee disponible.', M, y+8); return;
+    }
+    // Header
+    doc.setFillColor(...border); doc.rect(M, y, CW, 8, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(7.5); doc.setTextColor(...gray);
+    columns.forEach(c => doc.text(c.label, c.x, y+5.5));
+    y += 10;
+    rows.forEach((row, idx) => {
+      if (y > 272) { doc.addPage(); y = 20; }
+      if (idx%2===0) { doc.setFillColor(250,252,255); doc.rect(M, y-1, CW, 9, 'F'); }
+      doc.setDrawColor(...border); doc.setLineWidth(0.12); doc.line(M, y+7.5, W-M, y+7.5);
+      doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...dark);
+      columns.forEach(c => {
+        const val = clip(row[c.key]||'—', Math.floor(c.w/2.2));
+        doc.text(val, c.x, y+5.5);
+      }); y+=9;
+    }); y+=8;
+  }
+
+  let y = 60;
+
+  // ════════════════════════════════════════════════════════════════════════
+  if (tab === 'ov') {
+    // ── VUE D'ENSEMBLE ────────────────────────────────────────────────────
+    let s;
+    try { s = await api('GET', `/api/admin/stats?frequency=${freq}`); }
+    catch(e) { toast('Erreur chargement données', 'error'); return; }
+
+    drawHeader(blue);
+
+    // 4 KPI cards
+    const cardW = (CW - 3*5) / 4, cardH = 26;
+    [
+      [fmtN(s.counts.enterprises), 'Entreprises',    blue],
+      [fmtN(s.counts.restaurants), 'Restaurants',    orange],
+      [fmtN(s.counts.employees),   'Employes',       green],
+      [fmtP(s.totalMobilized),     'Total mobilise', purple],
+    ].forEach(([val, lbl, col], i) => {
+      const cx = M + i*(cardW+5);
+      doc.setFillColor(...light); doc.roundedRect(cx, y, cardW, cardH, 2, 2, 'F');
+      doc.setFillColor(...col); doc.roundedRect(cx, y, cardW, 4, 2, 2, 'F'); doc.rect(cx, y+2, cardW, 2, 'F');
+      doc.setFont('helvetica','bold'); doc.setFontSize(i===3?7.5:15); doc.setTextColor(...col);
+      doc.text(val, cx+cardW/2, y+(i===3?15:16), { align:'center', maxWidth:cardW-4 });
+      doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...gray);
+      doc.text(lbl, cx+cardW/2, y+22, { align:'center' });
+    });
+    y += cardH + 8;
+
+    // Genre
+    doc.setFillColor(236,254,255); doc.roundedRect(M, y, CW, 11, 2, 2, 'F');
+    doc.setFillColor(...blue); doc.roundedRect(M, y, 3, 11, 1, 1, 'F'); doc.rect(M+1, y, 2, 11, 'F');
+    doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(...dark);
+    doc.text('Repartition genre :', M+6, y+7);
+    doc.setFont('helvetica','bold'); doc.setTextColor(...blue);
+    doc.text(`${fmtN(s.gender?.male||0)} hommes`, M+44, y+7);
+    doc.setTextColor(...gray); doc.text('/', M+68, y+7);
+    doc.setTextColor(...orange); doc.text(`${fmtN(s.gender?.female||0)} femmes`, M+73, y+7);
+    y += 20;
+
+    drawMoneyTable('Recettes par restaurant', Object.entries(s.restaurantRevenue||{}), blue);
+    drawMoneyTable('Budget par entreprise',   Object.entries(s.enterpriseBudget  ||{}), orange);
+
+    drawFooter(blue);
+    doc.save(`rapport-admin-global-${freq}-${new Date().toISOString().slice(0,10)}.pdf`);
+
+  } else if (tab === 'ent') {
+    // ── LISTE ENTREPRISES ────────────────────────────────────────────────
+    let data;
+    try { data = await api('GET', '/api/admin/enterprises'); }
+    catch(e) { toast('Erreur chargement données', 'error'); return; }
+
+    drawHeader(blue);
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...blue);
+    doc.text(`${fmtN(data.length)} entreprise(s) enregistree(s)`, M, y); y+=10;
+    doc.setFillColor(...blue); doc.roundedRect(M, y, CW, 11, 2, 2, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...white);
+    doc.text('Annuaire des entreprises', M+5, y+7.5); y+=14;
+
+    const cols = [
+      { label:'NOM',       x:M+2,   w:52, key:'companyName' },
+      { label:'EMAIL',     x:M+56,  w:52, key:'email' },
+      { label:'TELEPHONE', x:M+110, w:32, key:'phone' },
+      { label:'INSCRIPTION',x:M+144,w:38, key:'createdAt' },
+    ];
+    const rows = data.map(e => ({ ...e, createdAt: fmtD(e.createdAt) }));
+    drawListTable(cols, rows, blue);
+
+    drawFooter(blue);
+    doc.save(`rapport-admin-entreprises-${new Date().toISOString().slice(0,10)}.pdf`);
+
+  } else if (tab === 'rst') {
+    // ── LISTE RESTAURANTS ────────────────────────────────────────────────
+    let data;
+    try { data = await api('GET', '/api/admin/restaurants'); }
+    catch(e) { toast('Erreur chargement données', 'error'); return; }
+
+    drawHeader(orange);
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...orange);
+    doc.text(`${fmtN(data.length)} restaurant(s) enregistre(s)`, M, y); y+=10;
+    doc.setFillColor(...orange); doc.roundedRect(M, y, CW, 11, 2, 2, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...white);
+    doc.text('Annuaire des restaurants', M+5, y+7.5); y+=14;
+
+    const cols = [
+      { label:'RESTAURANT',  x:M+2,   w:46, key:'restaurantName' },
+      { label:'GERANT',      x:M+50,  w:36, key:'ownerName' },
+      { label:'EMAIL',       x:M+88,  w:44, key:'email' },
+      { label:'TELEPHONE',   x:M+134, w:28, key:'phone' },
+      { label:'INSCRIPTION', x:M+164, w:28, key:'createdAt' },
+    ];
+    const rows = data.map(r => ({ ...r, createdAt: fmtD(r.createdAt) }));
+    drawListTable(cols, rows, orange);
+
+    drawFooter(orange);
+    doc.save(`rapport-admin-restaurants-${new Date().toISOString().slice(0,10)}.pdf`);
+
+  } else if (tab === 'emp') {
+    // ── LISTE EMPLOYES ───────────────────────────────────────────────────
+    let data;
+    try { data = await api('GET', '/api/admin/employees'); }
+    catch(e) { toast('Erreur chargement données', 'error'); return; }
+
+    drawHeader(green);
+    const males   = data.filter(e => e.gender==='male').length;
+    const females = data.filter(e => e.gender==='female').length;
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...green);
+    doc.text(`${fmtN(data.length)} employe(s)  —  ${fmtN(males)} hommes  /  ${fmtN(females)} femmes`, M, y); y+=10;
+    doc.setFillColor(...green); doc.roundedRect(M, y, CW, 11, 2, 2, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...white);
+    doc.text('Liste des employes', M+5, y+7.5); y+=14;
+
+    const cols = [
+      { label:'NOM COMPLET', x:M+2,   w:52, key:'fullName' },
+      { label:'GENRE',       x:M+56,  w:22, key:'gender' },
+      { label:'ENTREPRISE',  x:M+80,  w:60, key:'enterpriseName' },
+      { label:'INSCRIPTION', x:M+142, w:40, key:'createdAt' },
+    ];
+    const rows = data.map(e => ({ ...e, gender: e.gender==='male'?'Homme':'Femme', createdAt: fmtD(e.createdAt) }));
+    drawListTable(cols, rows, green);
+
+    drawFooter(green);
+    doc.save(`rapport-admin-employes-${new Date().toISOString().slice(0,10)}.pdf`);
+
+  } else if (tab === 'del') {
+    // ── DEMANDES DE SUPPRESSION ───────────────────────────────────────────
+    let data;
+    try { data = await api('GET', '/api/admin/deletion-requests'); }
+    catch(e) { toast('Erreur chargement données', 'error'); return; }
+
+    drawHeader(purple);
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...purple);
+    doc.text(`${fmtN(data.length)} demande(s) en attente`, M, y); y+=10;
+    doc.setFillColor(...purple); doc.roundedRect(M, y, CW, 11, 2, 2, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...white);
+    doc.text('Demandes de suppression de compte', M+5, y+7.5); y+=14;
+
+    const cols = [
+      { label:'NOM',    x:M+2,   w:44, key:'userName' },
+      { label:'TYPE',   x:M+48,  w:26, key:'userType' },
+      { label:'EMAIL',  x:M+76,  w:52, key:'email' },
+      { label:'DATE',   x:M+130, w:28, key:'createdAt' },
+      { label:'RAISON', x:M+160, w:32, key:'reason' },
+    ];
+    const rows = data.map(d => ({ ...d, createdAt: fmtD(d.createdAt) }));
+    drawListTable(cols, rows, purple);
+
+    drawFooter(purple);
+    doc.save(`rapport-admin-suppressions-${new Date().toISOString().slice(0,10)}.pdf`);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1434,9 +2192,7 @@ async function deleteNotif(id) {
 }
 
 async function clearAllNotifs() {
-  confirm2('Effacer toutes les notifications ?', async () => {
-    try { await api('DELETE', '/api/notifications'); loadNotifs(); } catch {}
-  });
+  try { await api('DELETE', '/api/notifications'); loadNotifs(); } catch {}
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1452,15 +2208,48 @@ async function loadConversations(suffix) {
   el(listId).classList.remove('hidden');
 
   try {
-    const convs = await api('GET', '/api/messages/conversations');
-    el(listId).innerHTML = convs.length
-      ? `<div class="conv-list">${convs.map(c => `
+    const isEnterprise = (suffix === 'ent');
+
+    // Charger simultanément les conversations existantes ET les partenaires affiliés
+    const [convs, partners] = await Promise.all([
+      api('GET', '/api/messages/conversations'),
+      isEnterprise
+        ? api('GET', '/api/enterprise/restaurants')   // restaurants affiliés à l'entreprise
+        : api('GET', '/api/restaurant/clientele'),    // entreprises affiliées au restaurant
+    ]);
+
+    // Indexer les conversations existantes par ID partenaire
+    const convMap = {};
+    convs.forEach(c => { convMap[c.id] = c; });
+
+    // Construire la liste : partenaires affiliés en premier, enrichis si déjà en conversation
+    const seen = new Set();
+    const list  = [];
+
+    partners.forEach(p => {
+      const pid  = p.id;
+      const name = isEnterprise ? p.restaurantName : p.companyName;
+      seen.add(pid);
+      if (convMap[pid]) {
+        list.push(convMap[pid]); // conversation existante avec données de lecture
+      } else {
+        list.push({ id: pid, name, unread: 0, lastMessage: null, isNew: true });
+      }
+    });
+
+    // Ajouter les éventuelles conversations avec des partenaires plus affiliés
+    convs.forEach(c => { if (!seen.has(c.id)) list.push(c); });
+
+    el(listId).innerHTML = list.length
+      ? `<div class="conv-list">${list.map(c => `
           <div class="conv-row" onclick="openChat('${c.id}','${esc(c.name)}','${suffix}')">
-            <span class="conv-name">${esc(c.name)}</span>
-            ${c.unread ? `<span class="nbadge">${c.unread}</span>` : ''}
-            <span class="conv-preview">${esc(c.lastMessage || '')}</span>
+            <div class="conv-row-top">
+              <span class="conv-name">${esc(c.name)}</span>
+              ${c.unread ? `<span class="nbadge">${c.unread}</span>` : ''}
+            </div>
+            <span class="conv-preview">${c.lastMessage ? esc(c.lastMessage) : '<em style="color:var(--gray)">Démarrer une conversation…</em>'}</span>
           </div>`).join('')}</div>`
-      : '<p class="empty">Aucune conversation. Affiliez-vous à un restaurant pour démarrer une discussion.</p>';
+      : '<p class="empty">Aucun partenaire affilié. Affiliez-vous à un restaurant pour démarrer une discussion.</p>';
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -1475,8 +2264,8 @@ async function openChat(partnerId, partnerName, suffix) {
   el(suf ? 'chat-partner-ent' : 'chat-partner').textContent = partnerName;
 
   await refreshChat(suf);
-  // Mark as read
-  try { await api('POST', '/api/messages/read', { senderId: partnerId }); } catch {}
+  // Marquer comme lus
+  try { await api('POST', '/api/messages/read', { withId: partnerId }); } catch {}
 }
 
 async function refreshChat(suf) {
@@ -1486,8 +2275,13 @@ async function refreshChat(suf) {
     msgsEl.innerHTML = msgs.map(m => {
       const mine = m.senderId === me.id;
       if (m.type === 'audio') {
+        // Pas de src initial — chargé à la demande via loadAudio()
         return `<div class="chat-bubble ${mine ? 'bubble-mine' : 'bubble-theirs'}">
-          <audio controls src="/api/messages/${m.id}/audio-src" data-mid="${m.id}" class="audio-player" onplay="loadAudio(this)"></audio>
+          <div class="audio-wrap">
+            <button class="btn ghost sm play-btn" onclick="loadAndPlay(this,'${m.id}')">▶ Écouter</button>
+            <audio controls data-mid="${m.id}" class="audio-player hidden"></audio>
+            ${m.audioDuration ? `<span class="audio-dur">${Math.floor(m.audioDuration/60)}:${String(m.audioDuration%60).padStart(2,'0')}</span>` : ''}
+          </div>
           <small>${fmtDateTime(m.timestamp)}</small>
         </div>`;
       }
@@ -1500,16 +2294,31 @@ async function refreshChat(suf) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
-async function loadAudio(audioEl) {
-  // Lazy-load audio via /api/messages/:id/audio
-  if (audioEl.src && audioEl.src.includes('blob:')) return; // Already loaded
-  const mid = audioEl.dataset.mid;
+async function loadAndPlay(btn, mid) {
+  const wrap     = btn.parentElement;
+  const audioEl  = wrap.querySelector('audio');
+  // Si déjà chargé, juste jouer/pauser
+  if (audioEl.src && (audioEl.src.startsWith('data:') || audioEl.src.startsWith('blob:'))) {
+    audioEl.classList.remove('hidden');
+    btn.classList.add('hidden');
+    audioEl.play().catch(() => {});
+    return;
+  }
+  btn.textContent = '⏳';
+  btn.disabled = true;
   try {
     const { audioData } = await api('GET', `/api/messages/${mid}/audio`);
     audioEl.src = audioData;
-    audioEl.play();
-  } catch (e) { toast('Impossible de charger l\'audio', 'error'); }
+    audioEl.classList.remove('hidden');
+    btn.classList.add('hidden');
+    audioEl.play().catch(() => {});
+  } catch (e) {
+    btn.textContent = '▶ Écouter';
+    btn.disabled = false;
+    toast('Impossible de charger l\'audio', 'error');
+  }
 }
+
 
 async function sendText(suf) {
   suf = suf || _chatPartnerSuffix;
@@ -1542,17 +2351,47 @@ function closeChat(suf) {
   _chatPartnerId = null;
 }
 
-// Audio recording
+// ── Enregistrement audio ──────────────────────────────────────────────────────
+let _recStream  = null;
+let _recMime    = 'audio/webm';
+
+// Libère les pistes micro
+function _stopStream() {
+  if (_recStream) { _recStream.getTracks().forEach(t => t.stop()); _recStream = null; }
+}
+
+// Arrête le recorder et retourne une Promise qui se résout quand les données sont prêtes
+function _stopRecorder() {
+  return new Promise(resolve => {
+    if (!_mediaRecorder || _mediaRecorder.state === 'inactive') { resolve(); return; }
+    _mediaRecorder.addEventListener('stop', resolve, { once: true });
+    _mediaRecorder.stop();
+  });
+}
+
 async function toggleRec(suf) {
   suf = suf || _chatPartnerSuffix;
-  if (_mediaRecorder && _mediaRecorder.state === 'recording') { stopRec(suf); return; }
+  // Si en cours d'enregistrement → stopper
+  if (_mediaRecorder && _mediaRecorder.state === 'recording') {
+    clearInterval(_recTimerInterval);
+    await _stopRecorder();
+    _stopStream();
+    el(suf ? 'rec-btn-ent' : 'rec-btn').textContent = '🎙️';
+    return;
+  }
+  // Démarrer un nouvel enregistrement
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    _recStream   = stream;
     _audioChunks = [];
-    _mediaRecorder = new MediaRecorder(stream);
+    _recMime     = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4']
+      .find(t => MediaRecorder.isTypeSupported(t)) || '';
+    _mediaRecorder = new MediaRecorder(stream, _recMime ? { mimeType: _recMime } : {});
+    _recMime       = _mediaRecorder.mimeType || 'audio/webm';
     _mediaRecorder.ondataavailable = e => { if (e.data.size) _audioChunks.push(e.data); };
     _mediaRecorder.start();
     _recSeconds = 0;
+    el(suf ? 'rec-time-ent' : 'rec-time').textContent = '0:00';
     el(suf ? 'rec-ui-ent' : 'rec-ui').classList.remove('hidden');
     el(suf ? 'rec-btn-ent' : 'rec-btn').textContent = '⏹️';
     _recTimerInterval = setInterval(() => {
@@ -1563,18 +2402,12 @@ async function toggleRec(suf) {
   } catch { toast('Microphone non accessible', 'error'); }
 }
 
-function stopRec(suf) {
-  if (!_mediaRecorder) return;
-  _mediaRecorder.stop();
-  clearInterval(_recTimerInterval);
-  el(suf ? 'rec-ui-ent' : 'rec-ui').classList.remove('hidden');
-  el(suf ? 'rec-btn-ent' : 'rec-btn').textContent = '🎙️';
-}
-
 function cancelRec(suf) {
   suf = suf || _chatPartnerSuffix;
-  if (_mediaRecorder) { _mediaRecorder.stop(); _mediaRecorder = null; }
   clearInterval(_recTimerInterval);
+  if (_mediaRecorder && _mediaRecorder.state !== 'inactive') _mediaRecorder.stop();
+  _mediaRecorder = null;
+  _stopStream();
   _audioChunks = [];
   el(suf ? 'rec-ui-ent' : 'rec-ui').classList.add('hidden');
   el(suf ? 'rec-btn-ent' : 'rec-btn').textContent = '🎙️';
@@ -1582,23 +2415,59 @@ function cancelRec(suf) {
 
 async function sendAudio(suf) {
   suf = suf || _chatPartnerSuffix;
-  if (!_audioChunks.length) { toast('Aucun audio enregistré', 'error'); return; }
-  const blob = new Blob(_audioChunks, { type: 'audio/webm' });
-  const reader = new FileReader();
-  reader.onload = async e => {
-    const audioData = e.target.result;
-    try {
-      await api('POST', '/api/messages', {
-        recipientId: _chatPartnerId,
-        type: 'audio',
-        audioData,
-        audioDuration: _recSeconds,
-      });
-      cancelRec(suf);
-      await refreshChat(suf);
-    } catch (err) { toast(err.message, 'error'); }
-  };
-  reader.readAsDataURL(blob);
+
+  const recUi  = el(suf ? 'rec-ui-ent' : 'rec-ui');
+  const recBtn = el(suf ? 'rec-btn-ent' : 'rec-btn');
+  const sendBtn = recUi.querySelector('button.btn.primary');
+
+  // Stopper l'enregistrement si encore actif et attendre les données
+  if (_mediaRecorder && _mediaRecorder.state === 'recording') {
+    clearInterval(_recTimerInterval);
+    if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = '⏳'; }
+    await _stopRecorder();
+    _stopStream();
+    recBtn.textContent = '🎙️';
+  }
+
+  if (!_audioChunks.length) {
+    toast('Aucun audio enregistré', 'error');
+    if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '📤'; }
+    return;
+  }
+
+  const blob     = new Blob(_audioChunks, { type: _recMime || 'audio/webm' });
+  const duration = _recSeconds;
+
+  // Vider immédiatement pour éviter un double envoi
+  _mediaRecorder = null;
+  _audioChunks   = [];
+
+  if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = '⏳'; }
+
+  try {
+    const base64 = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload  = e => res(e.target.result);
+      r.onerror = rej;
+      r.readAsDataURL(blob);
+    });
+
+    await api('POST', '/api/messages', {
+      recipientId:   _chatPartnerId,
+      type:          'audio',
+      audioData:     base64,
+      audioDuration: duration,
+    });
+
+    recUi.classList.add('hidden');
+    recBtn.textContent = '🎙️';
+    // Remettre le bouton d'envoi à son état initial pour le prochain enregistrement
+    if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '📤'; }
+    await refreshChat(suf);
+  } catch (err) {
+    if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '📤'; }
+    toast(err.message, 'error');
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1626,20 +2495,14 @@ async function doDeleteAccount() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 window.addEventListener('DOMContentLoaded', () => {
-  // Radio login — update placeholder
-  document.querySelectorAll('input[name="ltype"]').forEach(r => {
-    r.addEventListener('change', () => {
-      el('l-id').placeholder = r.value === 'employee' ? 'Nom complet' : 'Email';
-      el('login-id-label').textContent = r.value === 'employee' ? 'Nom complet' : 'Email';
-    });
-  });
 
   // Lien de réinitialisation (?reset=TOKEN)
   const resetToken = new URLSearchParams(window.location.search).get('reset');
   if (resetToken) {
-    showAuth('login');
+    el('auth-modal').classList.remove('hidden');
     el('pane-login').classList.add('hidden');
     el('pane-forgot').classList.add('hidden');
+    el('pane-register').classList.add('hidden');
     el('reset-token').value = resetToken;
     el('pane-reset').classList.remove('hidden');
   } else if (token && me) {

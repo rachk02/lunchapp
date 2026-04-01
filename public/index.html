@@ -25,32 +25,96 @@
 
 <!-- ═══ LANDING ═══ -->
 <div id="screen-landing">
-  <nav class="top-nav">
-    <span class="brand">🍽️ LunchApp</span>
-    <div>
-      <button class="btn ghost" onclick="showAuth()">Se connecter</button>
-      <button class="btn primary" onclick="showAuth('register')">S'inscrire</button>
+
+  <!-- Navigation -->
+  <nav class="land-nav">
+    <span class="brand land-brand">🍽️ LunchApp</span>
+    <div class="land-nav-actions">
+      <button class="btn ghost sm" onclick="showAuth()">Se connecter</button>
+      <button class="btn primary sm" onclick="showAuth('register')">S'inscrire</button>
     </div>
   </nav>
-  <div class="hero">
-    <h1>Gérez vos repas d'entreprise</h1>
-    <p>Restaurants, entreprises et employés connectés en temps réel</p>
-    <div class="hero-btns">
-      <button class="btn primary lg" onclick="showAuth('register')">Commencer</button>
-      <button class="btn outline lg" onclick="showAuth()">Connexion</button>
+
+  <!-- Hero -->
+  <section class="land-hero">
+    <div class="land-hero-inner">
+      <h1>La cantine digitale<br><span class="land-h1-accent">de votre entreprise</span></h1>
+      <p class="land-sub">Connectez restaurants, entreprises et employés.<br>Menus, commandes et messagerie — tout en un, en temps réel.</p>
+      <div class="land-cta">
+        <button class="btn primary lg" onclick="showAuth('register')">Commencer gratuitement →</button>
+        <button class="btn land-ghost lg" onclick="showAuth()">Se connecter</button>
+      </div>
+      <div class="land-trust">
+        <div class="land-trust-item">
+          <span class="lt-num">500+</span>
+          <span class="lt-lbl">Repas / jour</span>
+        </div>
+        <div class="land-trust-sep"></div>
+        <div class="land-trust-item">
+          <span class="lt-num" id="land-stat-restaurants">—</span>
+          <span class="lt-lbl">Restaurants</span>
+        </div>
+        <div class="land-trust-sep"></div>
+        <div class="land-trust-item">
+          <span class="lt-num" id="land-stat-enterprises">—</span>
+          <span class="lt-lbl">Entreprises</span>
+        </div>
+      </div>
     </div>
-  </div>
-  <div class="cards-row">
-    <div class="info-card"><div class="ic-icon">🏢</div><h3>Entreprises</h3><p>Affiliez-vous aux restaurants, gérez vos employés et suivez les consommations.</p></div>
-    <div class="info-card"><div class="ic-icon">🍴</div><h3>Restaurants</h3><p>Publiez vos menus, gérez vos commandes et développez votre clientèle.</p></div>
-    <div class="info-card"><div class="ic-icon">👤</div><h3>Employés</h3><p>Choisissez votre repas du jour en quelques secondes.</p></div>
-  </div>
+  </section>
+
+  <!-- Features -->
+  <section class="land-features">
+    <div class="land-features-inner">
+      <h2 class="land-feat-h2">Un espace dédié<br>pour chaque acteur</h2>
+      <p class="land-feat-sub">Chaque utilisateur dispose d'un espace dédié, conçu pour ses besoins spécifiques.</p>
+      <div class="land-feat-grid">
+
+        <div class="land-feat-card">
+          <div class="land-feat-icon" style="background:#FFF7ED">🏢</div>
+          <h3>Entreprises</h3>
+          <p>Affiliez-vous à des restaurants, gérez vos employés et consultez les statistiques de consommation en temps réel.</p>
+          <ul class="land-feat-ul">
+            <li>Gestion des employés</li>
+            <li>Suivi des commandes</li>
+            <li>Factures &amp; abonnements</li>
+          </ul>
+        </div>
+
+        <div class="land-feat-card land-feat-card--main">
+          <div class="land-feat-badge">Populaire</div>
+          <div class="land-feat-icon" style="background:#E0F2FE">🍴</div>
+          <h3>Restaurants</h3>
+          <p>Publiez vos menus, recevez les commandes et développez votre clientèle entreprise avec un tableau de bord complet.</p>
+          <ul class="land-feat-ul">
+            <li>Menu complet &amp; journalier</li>
+            <li>Gestion des commandes</li>
+            <li>Messagerie instantanée</li>
+          </ul>
+        </div>
+
+        <div class="land-feat-card">
+          <div class="land-feat-icon" style="background:#DCFCE7">👤</div>
+          <h3>Employés</h3>
+          <p>Consultez le menu du jour et choisissez votre repas en quelques secondes depuis votre smartphone.</p>
+          <ul class="land-feat-ul">
+            <li>Menu du jour en temps réel</li>
+            <li>Notifications intelligentes</li>
+            <li>Historique des repas</li>
+          </ul>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
 </div>
 
-<!-- ═══ AUTH ═══ -->
-<div id="screen-auth" class="hidden">
-  <div class="auth-wrap">
-    <button class="btn-link back" onclick="showLanding()">← Retour</button>
+<!-- ═══ AUTH MODALE ═══ -->
+<div id="auth-modal" class="auth-modal-backdrop hidden" onclick="if(event.target===this)closeAuthModal()">
+  <div class="auth-modal-card screen-enter">
+    <button class="auth-modal-close" onclick="closeAuthModal()">✕</button>
+
     <div class="tabs">
       <button class="tab active" id="tab-login" onclick="authTab('login')">Connexion</button>
       <button class="tab" id="tab-register" onclick="authTab('register')">Inscription</button>
@@ -58,13 +122,7 @@
 
     <!-- Connexion -->
     <div id="pane-login">
-      <div class="radio-row">
-        <label><input type="radio" name="ltype" value="enterprise" checked> Entreprise</label>
-        <label><input type="radio" name="ltype" value="restaurant"> Restaurant</label>
-        <label><input type="radio" name="ltype" value="employee"> Employé</label>
-        <label><input type="radio" name="ltype" value="superadmin"> Admin</label>
-      </div>
-      <div id="login-id-label" class="field-label">Email</div>
+      <div class="field-label">Email ou nom complet</div>
       <input id="l-id" type="text" placeholder="Email ou nom complet"/>
       <div class="field-label">Mot de passe</div>
       <div class="pwd-row">
@@ -125,7 +183,9 @@
         <input id="r-remail" type="email" placeholder="Email *"/>
         <input id="r-rphone" type="tel" placeholder="Téléphone"/>
         <input id="r-addr" type="text" placeholder="Adresse"/>
-        <input id="r-spec" type="text" placeholder="Spécialité (Cuisine africaine…)"/>
+        <div class="field-label">Spécialités (plusieurs possibles)</div>
+        <div id="r-spec-container" class="specialty-grid"></div>
+        <script>document.addEventListener('DOMContentLoaded',()=>renderSpecialtyCheckboxes('r-spec-container',[]));</script>
         <div class="field-label">Paiements mobile</div>
         <div id="pay-entries">
           <div class="pay-entry">
@@ -142,6 +202,7 @@
         <button class="btn primary full mt" onclick="doRegister('restaurant')">Créer mon restaurant</button>
       </div>
     </div>
+
   </div>
 </div>
 
@@ -153,6 +214,7 @@
       <button class="notif-btn" onclick="showPane('notifs')" title="Notifications">
         🔔<span id="notif-count" class="nbadge hidden">0</span>
       </button>
+      <div id="app-avatar" class="app-avatar">?</div>
       <span id="uname" class="uname"></span>
       <span id="urole" class="urole-badge"></span>
       <button class="btn ghost sm" onclick="doLogout()">Déconnexion</button>
@@ -202,18 +264,19 @@
 
       <div id="pane-clientele" class="pane hidden">
         <div class="pane-header">
-          <h2>👥 Clientèle du jour</h2>
+          <h2>📦 Commandes</h2>
           <button class="btn ghost sm" onclick="loadClientele()">↻ Rafraîchir</button>
         </div>
+
+        <h3 class="section-title">🏢 Commandes par entreprise</h3>
         <div id="clientele-list"></div>
+
         <hr class="divider"/>
-        <h2>📦 Commandes reçues</h2>
-        <div id="rst-orders-list"></div>
-        <hr class="divider"/>
-        <h2>🔔 Demandes d'abonnement</h2>
+        <h3 class="section-title">🔔 Demandes d'abonnement</h3>
         <div id="rst-subs-list"></div>
+
         <hr class="divider"/>
-        <h2>🏢 Proposer mes services</h2>
+        <h3 class="section-title">📤 Proposer mes services</h3>
         <div id="rst-enterprises-list"></div>
       </div>
 
@@ -270,28 +333,54 @@
       </div>
 
       <div id="pane-ent-employees" class="pane hidden">
-        <div class="pane-header">
-          <h2>👥 Employés</h2>
-          <button class="btn primary sm" onclick="openEmpModal()">+ Ajouter</button>
+        <!-- Barre d'onglets interne -->
+        <div class="dash-tab-bar">
+          <button class="dtab active" id="dtab-emps"     onclick="switchEntTab('emps')">👥 Employés</button>
+          <button class="dtab"        id="dtab-orders"   onclick="switchEntTab('orders')">📦 Commandes</button>
+          <button class="dtab"        id="dtab-invoices" onclick="switchEntTab('invoices')">🧾 Factures</button>
+          <button class="dtab"        id="dtab-stats"    onclick="switchEntTab('stats')">📊 Statistiques</button>
         </div>
-        <div id="ent-emp-list"></div>
-        <hr class="divider"/>
-        <div class="pane-header">
-          <h2>📦 Commandes</h2>
-          <button class="btn ghost sm" onclick="loadEntOrders()">↻</button>
+
+        <!-- Panneau Employés -->
+        <div id="dtab-panel-emps">
+          <div class="pane-header">
+            <h2>👥 Employés</h2>
+            <button class="btn primary sm" onclick="openEmpModal()">+ Ajouter</button>
+          </div>
+          <div id="ent-emp-list"></div>
         </div>
-        <div id="ent-orders-list"></div>
-        <hr class="divider"/>
-        <div class="pane-header">
-          <h2>📊 Statistiques</h2>
-          <select id="ent-freq" onchange="loadEntStats()">
-            <option value="daily">Aujourd'hui</option><option value="weekly">7 jours</option>
-            <option value="monthly" selected>Ce mois</option><option value="quarterly">Trimestre</option>
-            <option value="semi-annual">Semestre</option><option value="annual">Année</option>
-          </select>
-          <button class="btn ghost sm" onclick="pdfEntStats()">⬇ PDF</button>
+
+        <!-- Panneau Commandes -->
+        <div id="dtab-panel-orders" class="hidden">
+          <div class="pane-header">
+            <h2>📦 Commandes</h2>
+            <button class="btn ghost sm" onclick="loadEntOrders()">↻ Rafraîchir</button>
+          </div>
+          <div id="ent-orders-list"></div>
         </div>
-        <div id="ent-stats-content"></div>
+
+        <!-- Panneau Factures -->
+        <div id="dtab-panel-invoices" class="hidden">
+          <div class="pane-header">
+            <h2>🧾 Factures reçues</h2>
+            <button class="btn ghost sm" onclick="loadEntInvoices()">↻ Rafraîchir</button>
+          </div>
+          <div id="ent-invoices-list"></div>
+        </div>
+
+        <!-- Panneau Statistiques -->
+        <div id="dtab-panel-stats" class="hidden">
+          <div class="pane-header">
+            <h2>📊 Statistiques</h2>
+            <select id="ent-freq" onchange="loadEntStats()">
+              <option value="daily">Aujourd'hui</option><option value="weekly">7 jours</option>
+              <option value="monthly" selected>Ce mois</option><option value="quarterly">Trimestre</option>
+              <option value="semi-annual">Semestre</option><option value="annual">Année</option>
+            </select>
+            <button class="btn ghost sm" onclick="pdfEntStats()">⬇ PDF</button>
+          </div>
+          <div id="ent-stats-content"></div>
+        </div>
       </div>
 
       <div id="pane-ent-messages" class="pane hidden">
@@ -331,20 +420,23 @@
 
       <!-- ── ADMIN ── -->
       <div id="pane-admin" class="pane hidden">
-        <div class="admin-tabs">
-          <button class="atab active" onclick="adminTab('ov',this)">Vue globale</button>
-          <button class="atab" onclick="adminTab('ent',this)">Entreprises</button>
-          <button class="atab" onclick="adminTab('rst',this)">Restaurants</button>
-          <button class="atab" onclick="adminTab('emp',this)">Employés</button>
-          <button class="atab" onclick="adminTab('del',this)">Suppressions</button>
+        <div class="pane-header" style="margin-bottom:16px">
+          <h2>⚙️ Administration</h2>
+          <div class="freq-row" id="admin-freq-row">
+            <select id="adm-freq" onchange="loadAdminStats()">
+              <option value="daily">Aujourd'hui</option><option value="weekly">7 jours</option>
+              <option value="monthly" selected>Ce mois</option><option value="quarterly">Trimestre</option>
+              <option value="semi-annual">Semestre</option><option value="annual">Année</option>
+            </select>
+            <button class="btn ghost sm" onclick="pdfAdminStats()">⬇ PDF</button>
+          </div>
         </div>
-        <div id="admin-freq-row" class="freq-row" style="margin:12px 0">
-          <select id="adm-freq" onchange="loadAdminStats()">
-            <option value="daily">Aujourd'hui</option><option value="weekly">7 jours</option>
-            <option value="monthly" selected>Ce mois</option><option value="quarterly">Trimestre</option>
-            <option value="semi-annual">Semestre</option><option value="annual">Année</option>
-          </select>
-          <button class="btn ghost sm" onclick="pdfAdminStats()">⬇ PDF</button>
+        <div class="admin-tabs">
+          <button class="atab active" onclick="adminTab('ov',this)">📊 Vue globale</button>
+          <button class="atab" onclick="adminTab('ent',this)">🏢 Entreprises</button>
+          <button class="atab" onclick="adminTab('rst',this)">🍴 Restaurants</button>
+          <button class="atab" onclick="adminTab('emp',this)">👤 Employés</button>
+          <button class="atab" onclick="adminTab('del',this)">🗑️ Suppressions</button>
         </div>
         <div id="admin-content"></div>
       </div>
@@ -363,6 +455,9 @@
 
     </main>
   </div>
+
+  <!-- Bottom navigation (mobile uniquement) -->
+  <nav id="bottom-nav" class="bottom-nav"></nav>
 </div>
 
 <!-- ═══ MODALS ═══ -->
@@ -442,7 +537,8 @@
     <input id="prof-fname" type="text" placeholder="Votre nom complet"/>
     <input id="prof-phone" type="tel" placeholder="Téléphone"/>
     <input id="prof-addr" type="text" placeholder="Adresse"/>
-    <input id="prof-spec" type="text" placeholder="Spécialité"/>
+    <div class="field-label">Spécialités</div>
+    <div id="prof-spec-container" class="specialty-grid"></div>
     <textarea id="prof-desc" rows="2" placeholder="Description…"></textarea>
     <div class="field-label">Modes de paiement</div>
     <div id="prof-pay-entries"></div>

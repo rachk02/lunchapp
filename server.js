@@ -3,13 +3,12 @@
 // server.js — Backend LunchApp v2
 // ═══════════════════════════════════════════════════════════════════════════════
 
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 const express    = require('express');
 const bcrypt     = require('bcryptjs');
 const jwt        = require('jsonwebtoken');
 const cors       = require('cors');
-const fs         = require('fs');
 const path       = require('path');
 const nodemailer = require('nodemailer');
 const PDFDocument = require('pdfkit');
@@ -17,6 +16,7 @@ const PDFDocument = require('pdfkit');
 const app        = express();
 const PORT       = process.env.PORT       || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'lunchapp_2024_secret_key';
+const APP_URL    = process.env.APP_URL    || `http://localhost:${PORT}`;
 const LOCK_MIN   = 5; // minutes avant verrouillage du choix
 
 app.use(cors());
@@ -67,7 +67,7 @@ async function sendWelcomeEmail({ to, name, role }) {
         `}
       </ul>
       <div style="margin:24px 0;text-align:center">
-        <a href="http://localhost:${PORT}" style="background:#F97316;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold">
+        <a href="${APP_URL}" style="background:#F97316;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold">
           Accéder à LunchApp
         </a>
       </div>
@@ -92,38 +92,10 @@ async function sendWelcomeEmail({ to, name, role }) {
   }
 }
 
-// ── Dossier data ──────────────────────────────────────────────────────────────
-const DB_DIR = process.env.DB_DIR
-  || (process.env.VERCEL ? '/tmp/data' : path.join(__dirname, 'data'));
-if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
-
-const FILES = {
-  enterprises:      'enterprises.json',
-  employees:        'employees.json',
-  restaurants:      'restauratrices.json',
-  menus:            'menus.json',
-  dailyMenus:       'dailyMenus.json',
-  affiliations:     'affiliations.json',
-  offers:           'offers.json',
-  choices:          'choices.json',
-  orders:           'orders.json',
-  subscriptions:    'subscriptions.json',
-  notifications:    'notifications.json',
-  ratings:          'ratings.json',
-  deletionRequests: 'deletionRequests.json',
-  messages:         'messages.json',
-  passwordResets:   'passwordResets.json',
-};
-
-function read(key) {
-  const f = path.join(DB_DIR, FILES[key]);
-  if (!fs.existsSync(f)) return [];
-  try { return JSON.parse(fs.readFileSync(f, 'utf8')) || []; } catch { return []; }
-}
-
-function write(key, data) {
-  fs.writeFileSync(path.join(DB_DIR, FILES[key]), JSON.stringify(data, null, 2));
-}
+// ── Base de données (PostgreSQL si DATABASE_URL, sinon JSON) ──────────────────
+const db = require('./db');
+async function read(key)        { return db.read(key); }
+async function write(key, data) { return db.write(key, data); }
 
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -155,7 +127,9 @@ function auth(req, res, next) {
   try {
     req.user = jwt.verify(token, JWT_SECRET);
     next();
-  } catch {
+  } catch (err) {
+    if (err.name === 'TokenExpiredError')
+      return res.status(401).json({ error: 'Session expirée, veuillez vous reconnecter' });
     res.status(401).json({ error: 'Token invalide' });
   }
 }
@@ -197,17 +171,44 @@ app.get('/api/events', (req, res) => {
 });
 
 // ── Helpers notifications ─────────────────────────────────────────────────────
-function pushNotif(userId, userRole, type, title, message, data = {}) {
-  const notifs = read('notifications');
+async function pushNotif(userId, userRole, type, title, message, data = {}) {
+  const notifs = await read('notifications');
   const n = {
     id: uid(), userId: String(userId), userRole, type,
     title, message, data, read: false,
     createdAt: new Date().toISOString(),
   };
   notifs.push(n);
-  write('notifications', notifs);
+  await write('notifications', notifs);
   sseNotify(userId, 'notification', n);
   return n;
+}
+
+// Notifie tous les employés des entreprises affiliées au restaurant que le menu a changé
+async function notifyMenuUpdate(restaurantId, restaurantName, changeType) {
+  const affiliations = (await read('affiliations')).filter(a => a.restaurantId === restaurantId);
+  if (!affiliations.length) return;
+  const employees = await read('employees');
+  const enterpriseIds = [...new Set(affiliations.map(a => a.enterpriseId))];
+  const titles = {
+    item_added:   '🍽️ Menu mis à jour',
+    item_updated: '🍽️ Menu mis à jour',
+    item_deleted: '🍽️ Menu mis à jour',
+    daily_updated:'📋 Menu du jour mis à jour',
+  };
+  const messages = {
+    item_added:   `${restaurantName} a ajouté un nouveau plat/boisson à son menu.`,
+    item_updated: `${restaurantName} a modifié un article de son menu.`,
+    item_deleted: `${restaurantName} a retiré un article de son menu.`,
+    daily_updated:`${restaurantName} a mis à jour son menu du jour.`,
+  };
+  const title   = titles[changeType]   || '🍽️ Menu mis à jour';
+  const message = messages[changeType] || `${restaurantName} a mis à jour son menu.`;
+  await Promise.all(
+    employees
+      .filter(e => enterpriseIds.includes(e.enterpriseId))
+      .map(e => pushNotif(e.id, 'employee', 'menu_updated', title, message, { restaurantId }))
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -215,35 +216,30 @@ function pushNotif(userId, userRole, type, title, message, data = {}) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 app.post('/api/login', async (req, res) => {
-  const { email, password, type } = req.body;
-  if (!email || !password || !type) return res.status(400).json({ error: 'Champs requis' });
+  const { email, password } = req.body;
+  if (!email || !password) return res.status(400).json({ error: 'Champs requis' });
 
-  if (type === 'superadmin') {
-    if (email === SUPERADMIN.email && password === SUPERADMIN.password) {
-      const token = jwt.sign({ id: SUPERADMIN.id, role: 'superadmin', fullName: SUPERADMIN.fullName }, JWT_SECRET, { expiresIn: '7d' });
-      return res.json({ token, user: { id: SUPERADMIN.id, role: 'superadmin', fullName: SUPERADMIN.fullName } });
-    }
-    return res.status(401).json({ error: 'Identifiants invalides' });
+  const id = email.toLowerCase().trim();
+
+  // Superadmin
+  if (id === SUPERADMIN.email.toLowerCase() && password === SUPERADMIN.password) {
+    const token = jwt.sign({ id: SUPERADMIN.id, role: 'superadmin', fullName: SUPERADMIN.fullName }, JWT_SECRET, { expiresIn: '7d' });
+    return res.json({ token, user: { id: SUPERADMIN.id, role: 'superadmin', fullName: SUPERADMIN.fullName } });
   }
 
-  let users, userObj;
+  // Chercher par email dans entreprises puis restaurants
+  let userObj = null;
+  for (const key of ['enterprises', 'restaurants']) {
+    const found = (await read(key)).find(u => u.email?.toLowerCase() === id);
+    if (found) { userObj = found; break; }
+  }
 
-  if (type === 'enterprise') {
-    users = read('enterprises');
-    userObj = users.find(u => u.email?.toLowerCase() === email.toLowerCase().trim());
-  } else if (type === 'restaurant') {
-    users = read('restaurants');
-    userObj = users.find(u => u.email?.toLowerCase() === email.toLowerCase().trim());
-  } else if (type === 'employee') {
-    users = read('employees');
-    const lower = email.toLowerCase().trim();
-    userObj = users.find(u => {
+  // Chercher par nom complet dans les employés
+  if (!userObj) {
+    userObj = (await read('employees')).find(u => {
       const n = u.fullName.toLowerCase();
-      const parts = n.split(' ');
-      return n === lower || parts.slice().reverse().join(' ') === lower;
+      return n === id || n.split(' ').reverse().join(' ') === id;
     });
-  } else {
-    return res.status(400).json({ error: 'Type de compte invalide' });
   }
 
   if (!userObj) return res.status(401).json({ error: 'Identifiants invalides' });
@@ -252,11 +248,11 @@ app.post('/api/login', async (req, res) => {
   if (!valid) return res.status(401).json({ error: 'Identifiants invalides' });
 
   const payload = { id: userObj.id, role: userObj.role };
-  if (userObj.role === 'enterprise') payload.companyName = userObj.companyName;
+  if (userObj.role === 'enterprise')   payload.companyName    = userObj.companyName;
   if (userObj.role === 'restauratrice') payload.restaurantName = userObj.restaurantName;
   if (userObj.role === 'employee') {
-    payload.fullName = userObj.fullName;
-    payload.enterpriseId = userObj.enterpriseId;
+    payload.fullName      = userObj.fullName;
+    payload.enterpriseId  = userObj.enterpriseId;
     payload.enterpriseName = userObj.enterpriseName;
   }
 
@@ -273,9 +269,9 @@ app.post('/api/auth/forgot-password', async (req, res) => {
   // Chercher dans entreprises et restaurants
   const lower = email.toLowerCase().trim();
   let found = null, role = null;
-  const ent = read('enterprises').find(e => e.email?.toLowerCase() === lower);
+  const ent = (await read('enterprises')).find(e => e.email?.toLowerCase() === lower);
   if (ent)  { found = ent;  role = 'enterprise'; }
-  const rst = !found && read('restaurants').find(r => r.email?.toLowerCase() === lower);
+  const rst = !found && (await read('restaurants')).find(r => r.email?.toLowerCase() === lower);
   if (rst)  { found = rst;  role = 'restaurant'; }
 
   // Réponse identique que l'email existe ou non (sécurité)
@@ -286,11 +282,11 @@ app.post('/api/auth/forgot-password', async (req, res) => {
   // Générer token (valable 30 min)
   const token    = uid() + uid();
   const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-  const resets   = read('passwordResets').filter(r => r.email !== lower); // un seul token actif par email
+  const resets   = (await read('passwordResets')).filter(r => r.email !== lower); // un seul token actif par email
   resets.push({ token, email: lower, role, expiresAt });
-  write('passwordResets', resets);
+  await write('passwordResets', resets);
 
-  const resetLink = `http://localhost:${PORT}/?reset=${token}`;
+  const resetLink = `${APP_URL}/?reset=${token}`;
   const html = `
   <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;border:1px solid #E2E8F0;border-radius:10px;overflow:hidden">
     <div style="background:#F97316;padding:24px 32px">
@@ -331,32 +327,32 @@ app.post('/api/auth/reset-password', async (req, res) => {
   if (!token || !newPassword) return res.status(400).json({ error: 'Token et nouveau mot de passe requis' });
   if (!validatePassword(newPassword)) return res.status(400).json({ error: 'Mot de passe trop faible (8 car. min, maj, min, chiffre, spécial)' });
 
-  const resets = read('passwordResets');
+  const resets = await read('passwordResets');
   const entry  = resets.find(r => r.token === token);
   if (!entry)                          return res.status(400).json({ error: 'Lien invalide ou déjà utilisé' });
   if (new Date(entry.expiresAt) < new Date()) {
-    write('passwordResets', resets.filter(r => r.token !== token));
+    await write('passwordResets', resets.filter(r => r.token !== token));
     return res.status(400).json({ error: 'Lien expiré. Veuillez refaire une demande.' });
   }
 
   const hashed = await bcrypt.hash(newPassword, 10);
 
   if (entry.role === 'enterprise') {
-    const list = read('enterprises');
+    const list = await read('enterprises');
     const idx  = list.findIndex(e => e.email === entry.email);
     if (idx === -1) return res.status(404).json({ error: 'Compte introuvable' });
     list[idx].password = hashed;
-    write('enterprises', list);
+    await write('enterprises', list);
   } else {
-    const list = read('restaurants');
+    const list = await read('restaurants');
     const idx  = list.findIndex(r => r.email === entry.email);
     if (idx === -1) return res.status(404).json({ error: 'Compte introuvable' });
     list[idx].password = hashed;
-    write('restaurants', list);
+    await write('restaurants', list);
   }
 
   // Invalider le token
-  write('passwordResets', resets.filter(r => r.token !== token));
+  await write('passwordResets', resets.filter(r => r.token !== token));
   res.json({ message: 'Mot de passe mis à jour avec succès.' });
 });
 
@@ -366,7 +362,7 @@ app.post('/api/enterprise/register', async (req, res) => {
   if (!companyName || !email || !password) return res.status(400).json({ error: 'Champs requis' });
   if (!validatePassword(password)) return res.status(400).json({ error: 'Mot de passe trop faible (8 car. min, maj, min, chiffre, spécial)' });
 
-  const enterprises = read('enterprises');
+  const enterprises = await read('enterprises');
   if (enterprises.find(e => e.email?.toLowerCase() === email.toLowerCase()))
     return res.status(409).json({ error: 'Email déjà utilisé' });
 
@@ -377,7 +373,7 @@ app.post('/api/enterprise/register', async (req, res) => {
     role: 'enterprise', createdAt: new Date().toISOString(),
   };
   enterprises.push(enterprise);
-  write('enterprises', enterprises);
+  await write('enterprises', enterprises);
 
   const token = jwt.sign({ id: enterprise.id, role: 'enterprise', companyName: enterprise.companyName }, JWT_SECRET, { expiresIn: '7d' });
   const { password: _, ...safe } = enterprise;
@@ -393,7 +389,7 @@ app.post('/api/restauratrice/register', async (req, res) => {
   if (!restaurantName || !fullName || !email || !password) return res.status(400).json({ error: 'Champs requis' });
   if (!validatePassword(password)) return res.status(400).json({ error: 'Mot de passe trop faible' });
 
-  const restaurants = read('restaurants');
+  const restaurants = await read('restaurants');
   if (restaurants.find(r => r.email?.toLowerCase() === email.toLowerCase()))
     return res.status(409).json({ error: 'Email déjà utilisé' });
 
@@ -401,13 +397,15 @@ app.post('/api/restauratrice/register', async (req, res) => {
   const restaurant = {
     id: uid(), restaurantName: restaurantName.trim(), fullName: fullName.trim(),
     email: email.toLowerCase().trim(), password: hashed,
-    phone: phone || '', specialty: specialty || '', address: address || '',
+    phone: phone || '',
+    specialty: Array.isArray(specialty) ? specialty : (specialty ? [specialty] : []),
+    address: address || '',
     description: '', photo: '',
     paymentInfo: Array.isArray(paymentInfo) ? paymentInfo : [],
     role: 'restauratrice', createdAt: new Date().toISOString(),
   };
   restaurants.push(restaurant);
-  write('restaurants', restaurants);
+  await write('restaurants', restaurants);
 
   const token = jwt.sign({ id: restaurant.id, role: 'restauratrice', restaurantName: restaurant.restaurantName }, JWT_SECRET, { expiresIn: '7d' });
   const { password: _, ...safe } = restaurant;
@@ -421,13 +419,13 @@ app.post('/api/restauratrice/register', async (req, res) => {
 // RESTAURANTS (lecture publique)
 // ─────────────────────────────────────────────────────────────────────────────
 
-app.get('/api/restaurants', auth, (req, res) => {
-  const restaurants = read('restaurants').map(({ password, ...r }) => r);
+app.get('/api/restaurants', auth, async (req, res) => {
+  const restaurants = (await read('restaurants')).map(({ password, ...r }) => r);
   res.json(restaurants);
 });
 
-app.get('/api/restaurants/:id', auth, (req, res) => {
-  const r = read('restaurants').find(r => r.id === req.params.id);
+app.get('/api/restaurants/:id', auth, async (req, res) => {
+  const r = (await read('restaurants')).find(r => r.id === req.params.id);
   if (!r) return res.status(404).json({ error: 'Restaurant introuvable' });
   const { password, ...safe } = r;
   res.json(safe);
@@ -437,7 +435,7 @@ app.get('/api/restaurants/:id', auth, (req, res) => {
 app.patch('/api/restaurant/profile', auth, requireRole('restauratrice'), async (req, res) => {
   const { restaurantName, fullName, phone, address, specialty, description, photo, paymentInfo, password, newPassword } = req.body;
 
-  const restaurants = read('restaurants');
+  const restaurants = await read('restaurants');
   const idx = restaurants.findIndex(r => r.id === req.user.id);
   if (idx === -1) return res.status(404).json({ error: 'Restaurant introuvable' });
   const r = restaurants[idx];
@@ -446,7 +444,7 @@ app.patch('/api/restaurant/profile', auth, requireRole('restauratrice'), async (
   if (fullName      !== undefined) r.fullName = fullName.trim();
   if (phone         !== undefined) r.phone = phone;
   if (address       !== undefined) r.address = address;
-  if (specialty     !== undefined) r.specialty = specialty;
+  if (specialty     !== undefined) r.specialty = Array.isArray(specialty) ? specialty : (specialty ? [specialty] : []);
   if (description   !== undefined) r.description = description;
   if (photo         !== undefined) r.photo = photo;
   if (paymentInfo   !== undefined) r.paymentInfo = paymentInfo;
@@ -458,14 +456,14 @@ app.patch('/api/restaurant/profile', auth, requireRole('restauratrice'), async (
   }
   r.updatedAt = new Date().toISOString();
 
-  write('restaurants', restaurants);
+  await write('restaurants', restaurants);
   const { password: _, ...safe } = r;
   res.json(safe);
 });
 
 // ── Profil actuel du restaurant connecté ─────────────────────────────────────
-app.get('/api/restaurant/me', auth, requireRole('restauratrice'), (req, res) => {
-  const r = read('restaurants').find(r => r.id === req.user.id);
+app.get('/api/restaurant/me', auth, requireRole('restauratrice'), async (req, res) => {
+  const r = (await read('restaurants')).find(r => r.id === req.user.id);
   if (!r) return res.status(404).json({ error: 'Restaurant introuvable' });
   const { password, ...safe } = r;
   res.json(safe);
@@ -475,30 +473,31 @@ app.get('/api/restaurant/me', auth, requireRole('restauratrice'), (req, res) => 
 // MENU COMPLET (gestion par le restaurant)
 // ─────────────────────────────────────────────────────────────────────────────
 
-app.get('/api/restaurant/menu', auth, requireRole('restauratrice'), (req, res) => {
-  const menu = read('menus').find(m => m.restaurantId === req.user.id) || { restaurantId: req.user.id, items: [] };
+app.get('/api/restaurant/menu', auth, requireRole('restauratrice'), async (req, res) => {
+  const menu = (await read('menus')).find(m => m.restaurantId === req.user.id) || { restaurantId: req.user.id, items: [] };
   res.json(menu);
 });
 
-app.post('/api/restaurant/menu/items', auth, requireRole('restauratrice'), (req, res) => {
+app.post('/api/restaurant/menu/items', auth, requireRole('restauratrice'), async (req, res) => {
   const { name, category, price, description } = req.body;
   if (!name || !category) return res.status(400).json({ error: 'Nom et catégorie requis' });
   if (!['food', 'drink'].includes(category)) return res.status(400).json({ error: 'Catégorie invalide (food ou drink)' });
   if (price === undefined || price === null || isNaN(Number(price))) return res.status(400).json({ error: 'Prix requis' });
 
-  const menus = read('menus');
+  const menus = await read('menus');
   let menu = menus.find(m => m.restaurantId === req.user.id);
   if (!menu) { menu = { restaurantId: req.user.id, items: [] }; menus.push(menu); }
 
   const item = { id: uid(), name: name.trim(), category, price: Number(price), description: description || '' };
   menu.items.push(item);
   menu.updatedAt = new Date().toISOString();
-  write('menus', menus);
+  await write('menus', menus);
+  await notifyMenuUpdate(req.user.id, req.user.restaurantName, 'item_added');
   res.status(201).json(item);
 });
 
-app.put('/api/restaurant/menu/items/:itemId', auth, requireRole('restauratrice'), (req, res) => {
-  const menus = read('menus');
+app.put('/api/restaurant/menu/items/:itemId', auth, requireRole('restauratrice'), async (req, res) => {
+  const menus = await read('menus');
   const menu = menus.find(m => m.restaurantId === req.user.id);
   if (!menu) return res.status(404).json({ error: 'Menu introuvable' });
 
@@ -512,42 +511,43 @@ app.put('/api/restaurant/menu/items/:itemId', auth, requireRole('restauratrice')
   if (description !== undefined) menu.items[idx].description = description;
   menu.updatedAt = new Date().toISOString();
 
-  write('menus', menus);
+  await write('menus', menus);
+  await notifyMenuUpdate(req.user.id, req.user.restaurantName, 'item_updated');
   res.json(menu.items[idx]);
 });
 
-app.delete('/api/restaurant/menu/items/:itemId', auth, requireRole('restauratrice'), (req, res) => {
-  const menus = read('menus');
+app.delete('/api/restaurant/menu/items/:itemId', auth, requireRole('restauratrice'), async (req, res) => {
+  const menus = await read('menus');
   const menu = menus.find(m => m.restaurantId === req.user.id);
   if (!menu) return res.status(404).json({ error: 'Menu introuvable' });
 
   menu.items = menu.items.filter(i => i.id !== req.params.itemId);
   menu.updatedAt = new Date().toISOString();
-  write('menus', menus);
+  await write('menus', menus);
 
   // Supprimer aussi des menus journaliers
-  const dailyMenus = read('dailyMenus');
+  const dailyMenus = await read('dailyMenus');
   dailyMenus.forEach(d => {
     if (d.restaurantId === req.user.id)
       d.availableItems = (d.availableItems || []).filter(id => id !== req.params.itemId);
   });
-  write('dailyMenus', dailyMenus);
-
+  await write('dailyMenus', dailyMenus);
+  await notifyMenuUpdate(req.user.id, req.user.restaurantName, 'item_deleted');
   res.json({ success: true });
 });
 
 // Menu d'un restaurant (pour entreprises/employés affiliés)
-app.get('/api/restaurants/:id/menu', auth, (req, res) => {
+app.get('/api/restaurants/:id/menu', auth, async (req, res) => {
   if (req.user.role === 'enterprise') {
-    const aff = read('affiliations');
+    const aff = await read('affiliations');
     if (!aff.some(a => a.enterpriseId === req.user.id && a.restaurantId === req.params.id))
       return res.status(403).json({ error: 'Non affilié à ce restaurant' });
   } else if (req.user.role === 'employee') {
-    const aff = read('affiliations');
+    const aff = await read('affiliations');
     if (!aff.some(a => a.enterpriseId === req.user.enterpriseId && a.restaurantId === req.params.id))
       return res.status(403).json({ error: 'Non affilié à ce restaurant' });
   }
-  const menu = read('menus').find(m => m.restaurantId === req.params.id) || { restaurantId: req.params.id, items: [] };
+  const menu = (await read('menus')).find(m => m.restaurantId === req.params.id) || { restaurantId: req.params.id, items: [] };
   res.json(menu);
 });
 
@@ -555,20 +555,20 @@ app.get('/api/restaurants/:id/menu', auth, (req, res) => {
 // MENU JOURNALIER
 // ─────────────────────────────────────────────────────────────────────────────
 
-app.get('/api/restaurant/menu/daily', auth, requireRole('restauratrice'), (req, res) => {
+app.get('/api/restaurant/menu/daily', auth, requireRole('restauratrice'), async (req, res) => {
   const date = req.query.date || todayStr();
-  const dailyMenus = read('dailyMenus');
+  const dailyMenus = await read('dailyMenus');
   const daily = dailyMenus.find(d => d.restaurantId === req.user.id && d.date === date)
     || { restaurantId: req.user.id, date, availableItems: [] };
   res.json(daily);
 });
 
-app.put('/api/restaurant/menu/daily', auth, requireRole('restauratrice'), (req, res) => {
+app.put('/api/restaurant/menu/daily', auth, requireRole('restauratrice'), async (req, res) => {
   const { date, availableItems } = req.body;
   const d = date || todayStr();
   if (!Array.isArray(availableItems)) return res.status(400).json({ error: 'availableItems requis' });
 
-  const dailyMenus = read('dailyMenus');
+  const dailyMenus = await read('dailyMenus');
   const idx = dailyMenus.findIndex(dm => dm.restaurantId === req.user.id && dm.date === d);
   if (idx >= 0) {
     dailyMenus[idx].availableItems = availableItems;
@@ -576,26 +576,27 @@ app.put('/api/restaurant/menu/daily', auth, requireRole('restauratrice'), (req, 
   } else {
     dailyMenus.push({ restaurantId: req.user.id, date: d, availableItems, updatedAt: new Date().toISOString() });
   }
-  write('dailyMenus', dailyMenus);
+  await write('dailyMenus', dailyMenus);
+  await notifyMenuUpdate(req.user.id, req.user.restaurantName, 'daily_updated');
   res.json({ date: d, availableItems });
 });
 
 // Menu journalier d'un restaurant donné (pour entreprise/employé affilié)
-app.get('/api/restaurants/:id/menu/daily', auth, (req, res) => {
+app.get('/api/restaurants/:id/menu/daily', auth, async (req, res) => {
   if (req.user.role === 'enterprise') {
-    const aff = read('affiliations');
+    const aff = await read('affiliations');
     if (!aff.some(a => a.enterpriseId === req.user.id && a.restaurantId === req.params.id))
       return res.status(403).json({ error: 'Non affilié' });
   } else if (req.user.role === 'employee') {
-    const aff = read('affiliations');
+    const aff = await read('affiliations');
     if (!aff.some(a => a.enterpriseId === req.user.enterpriseId && a.restaurantId === req.params.id))
       return res.status(403).json({ error: 'Non affilié' });
   }
 
   const date = req.query.date || todayStr();
-  const daily = read('dailyMenus').find(d => d.restaurantId === req.params.id && d.date === date)
+  const daily = (await read('dailyMenus')).find(d => d.restaurantId === req.params.id && d.date === date)
     || { availableItems: [] };
-  const menu = read('menus').find(m => m.restaurantId === req.params.id) || { items: [] };
+  const menu = (await read('menus')).find(m => m.restaurantId === req.params.id) || { items: [] };
   const items = menu.items.filter(i => daily.availableItems.includes(i.id));
   res.json({ date, restaurantId: req.params.id, items, foods: items.filter(i => i.category === 'food'), drinks: items.filter(i => i.category === 'drink') });
 });
@@ -605,20 +606,20 @@ app.get('/api/restaurants/:id/menu/daily', auth, (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Entreprise s'affilie à un restaurant
-app.post('/api/enterprise/restaurants/:restaurantId/affiliate', auth, requireRole('enterprise'), (req, res) => {
+app.post('/api/enterprise/restaurants/:restaurantId/affiliate', auth, requireRole('enterprise'), async (req, res) => {
   const { restaurantId } = req.params;
-  if (!read('restaurants').find(r => r.id === restaurantId))
+  if (!(await read('restaurants')).find(r => r.id === restaurantId))
     return res.status(404).json({ error: 'Restaurant introuvable' });
 
-  const affiliations = read('affiliations');
+  const affiliations = await read('affiliations');
   if (affiliations.some(a => a.enterpriseId === req.user.id && a.restaurantId === restaurantId))
     return res.status(409).json({ error: 'Déjà affilié' });
 
   const aff = { id: uid(), enterpriseId: req.user.id, enterpriseName: req.user.companyName, restaurantId, createdAt: new Date().toISOString() };
   affiliations.push(aff);
-  write('affiliations', affiliations);
+  await write('affiliations', affiliations);
 
-  pushNotif(restaurantId, 'restauratrice', 'new_affiliation', 'Nouvelle affiliation',
+  await pushNotif(restaurantId, 'restauratrice', 'new_affiliation', 'Nouvelle affiliation',
     `${req.user.companyName} s'est affiliée à votre restaurant.`,
     { enterpriseId: req.user.id });
 
@@ -626,18 +627,18 @@ app.post('/api/enterprise/restaurants/:restaurantId/affiliate', auth, requireRol
 });
 
 // Entreprise se désaffilie
-app.delete('/api/enterprise/restaurants/:restaurantId/affiliate', auth, requireRole('enterprise'), (req, res) => {
-  const affiliations = read('affiliations').filter(a => !(a.enterpriseId === req.user.id && a.restaurantId === req.params.restaurantId));
-  write('affiliations', affiliations);
+app.delete('/api/enterprise/restaurants/:restaurantId/affiliate', auth, requireRole('enterprise'), async (req, res) => {
+  const affiliations = (await read('affiliations')).filter(a => !(a.enterpriseId === req.user.id && a.restaurantId === req.params.restaurantId));
+  await write('affiliations', affiliations);
   res.json({ success: true });
 });
 
 // Liste des restaurants affiliés de l'entreprise (avec menus)
-app.get('/api/enterprise/restaurants', auth, requireRole('enterprise'), (req, res) => {
-  const affiliations = read('affiliations').filter(a => a.enterpriseId === req.user.id);
-  const restaurants  = read('restaurants').map(({ password, ...r }) => r);
-  const menus        = read('menus');
-  const dailyMenus   = read('dailyMenus');
+app.get('/api/enterprise/restaurants', auth, requireRole('enterprise'), async (req, res) => {
+  const affiliations = (await read('affiliations')).filter(a => a.enterpriseId === req.user.id);
+  const restaurants  = (await read('restaurants')).map(({ password, ...r }) => r);
+  const menus        = await read('menus');
+  const dailyMenus   = await read('dailyMenus');
   const t            = todayStr();
 
   const result = affiliations.map(a => {
@@ -657,20 +658,20 @@ app.get('/api/enterprise/restaurants', auth, requireRole('enterprise'), (req, re
 });
 
 // Restaurant offre ses services à une entreprise
-app.post('/api/restaurant/enterprises/:enterpriseId/offer', auth, requireRole('restauratrice'), (req, res) => {
+app.post('/api/restaurant/enterprises/:enterpriseId/offer', auth, requireRole('restauratrice'), async (req, res) => {
   const { enterpriseId } = req.params;
-  if (!read('enterprises').find(e => e.id === enterpriseId))
+  if (!(await read('enterprises')).find(e => e.id === enterpriseId))
     return res.status(404).json({ error: 'Entreprise introuvable' });
 
-  const offers = read('offers');
+  const offers = await read('offers');
   if (offers.some(o => o.restaurantId === req.user.id && o.enterpriseId === enterpriseId))
     return res.status(409).json({ error: 'Offre déjà envoyée' });
 
   const offer = { id: uid(), restaurantId: req.user.id, restaurantName: req.user.restaurantName, enterpriseId, createdAt: new Date().toISOString() };
   offers.push(offer);
-  write('offers', offers);
+  await write('offers', offers);
 
-  pushNotif(enterpriseId, 'enterprise', 'service_offer', 'Offre de service',
+  await pushNotif(enterpriseId, 'enterprise', 'service_offer', 'Offre de service',
     `${req.user.restaurantName} vous propose ses services.`,
     { restaurantId: req.user.id });
 
@@ -678,18 +679,18 @@ app.post('/api/restaurant/enterprises/:enterpriseId/offer', auth, requireRole('r
 });
 
 // Restaurant retire son offre (et désaffilie)
-app.delete('/api/restaurant/enterprises/:enterpriseId/offer', auth, requireRole('restauratrice'), (req, res) => {
-  write('offers', read('offers').filter(o => !(o.restaurantId === req.user.id && o.enterpriseId === req.params.enterpriseId)));
-  write('affiliations', read('affiliations').filter(a => !(a.restaurantId === req.user.id && a.enterpriseId === req.params.enterpriseId)));
+app.delete('/api/restaurant/enterprises/:enterpriseId/offer', auth, requireRole('restauratrice'), async (req, res) => {
+  await write('offers', (await read('offers')).filter(o => !(o.restaurantId === req.user.id && o.enterpriseId === req.params.enterpriseId)));
+  await write('affiliations', (await read('affiliations')).filter(a => !(a.restaurantId === req.user.id && a.enterpriseId === req.params.enterpriseId)));
   res.json({ success: true });
 });
 
 // Clientèle du restaurant
-app.get('/api/restaurant/clientele', auth, requireRole('restauratrice'), (req, res) => {
-  const affiliations = read('affiliations').filter(a => a.restaurantId === req.user.id);
-  const enterprises  = read('enterprises').map(({ password, ...e }) => e);
+app.get('/api/restaurant/clientele', auth, requireRole('restauratrice'), async (req, res) => {
+  const affiliations = (await read('affiliations')).filter(a => a.restaurantId === req.user.id);
+  const enterprises  = (await read('enterprises')).map(({ password, ...e }) => e);
   const t            = todayStr();
-  const choices      = read('choices').filter(c => c.restaurantId === req.user.id && c.date === t);
+  const choices      = (await read('choices')).filter(c => c.restaurantId === req.user.id && c.date === t);
 
   const result = affiliations.map(a => {
     const e = enterprises.find(e => e.id === a.enterpriseId);
@@ -701,10 +702,10 @@ app.get('/api/restaurant/clientele', auth, requireRole('restauratrice'), (req, r
 });
 
 // Toutes les entreprises disponibles pour le restaurant
-app.get('/api/restaurant/enterprises', auth, requireRole('restauratrice'), (req, res) => {
-  const enterprises  = read('enterprises').map(({ password, ...e }) => e);
-  const affiliations = read('affiliations').filter(a => a.restaurantId === req.user.id);
-  const offers       = read('offers').filter(o => o.restaurantId === req.user.id);
+app.get('/api/restaurant/enterprises', auth, requireRole('restauratrice'), async (req, res) => {
+  const enterprises  = (await read('enterprises')).map(({ password, ...e }) => e);
+  const affiliations = (await read('affiliations')).filter(a => a.restaurantId === req.user.id);
+  const offers       = (await read('offers')).filter(o => o.restaurantId === req.user.id);
 
   const result = enterprises.map(e => ({
     ...e,
@@ -718,8 +719,8 @@ app.get('/api/restaurant/enterprises', auth, requireRole('restauratrice'), (req,
 // EMPLOYÉS
 // ─────────────────────────────────────────────────────────────────────────────
 
-app.get('/api/enterprise/employees', auth, requireRole('enterprise'), (req, res) => {
-  res.json(read('employees').filter(e => e.enterpriseId === req.user.id).map(({ password, ...e }) => e));
+app.get('/api/enterprise/employees', auth, requireRole('enterprise'), async (req, res) => {
+  res.json((await read('employees')).filter(e => e.enterpriseId === req.user.id).map(({ password, ...e }) => e));
 });
 
 app.post('/api/enterprise/employees', auth, requireRole('enterprise'), async (req, res) => {
@@ -727,7 +728,7 @@ app.post('/api/enterprise/employees', auth, requireRole('enterprise'), async (re
   if (!fullName || !password) return res.status(400).json({ error: 'Nom et mot de passe requis' });
   if (!['male', 'female'].includes(gender)) return res.status(400).json({ error: 'Genre requis (male/female)' });
 
-  const employees = read('employees');
+  const employees = await read('employees');
   const lower = fullName.toLowerCase().trim();
   const dup = employees.find(e => {
     if (e.enterpriseId !== req.user.id) return false;
@@ -743,14 +744,14 @@ app.post('/api/enterprise/employees', auth, requireRole('enterprise'), async (re
     createdAt: new Date().toISOString(),
   };
   employees.push(employee);
-  write('employees', employees);
+  await write('employees', employees);
 
   const { password: _, ...safe } = employee;
   res.status(201).json(safe);
 });
 
 app.put('/api/enterprise/employees/:id', auth, requireRole('enterprise'), async (req, res) => {
-  const employees = read('employees');
+  const employees = await read('employees');
   const idx = employees.findIndex(e => e.id === req.params.id && e.enterpriseId === req.user.id);
   if (idx === -1) return res.status(404).json({ error: 'Employé introuvable' });
 
@@ -764,17 +765,17 @@ app.put('/api/enterprise/employees/:id', auth, requireRole('enterprise'), async 
     employees[idx].password = await bcrypt.hash(newPassword, 10);
   }
   employees[idx].updatedAt = new Date().toISOString();
-  write('employees', employees);
+  await write('employees', employees);
 
   const { password: _, ...safe } = employees[idx];
   res.json(safe);
 });
 
-app.delete('/api/enterprise/employees/:id', auth, requireRole('enterprise'), (req, res) => {
-  const employees = read('employees');
+app.delete('/api/enterprise/employees/:id', auth, requireRole('enterprise'), async (req, res) => {
+  const employees = await read('employees');
   if (!employees.find(e => e.id === req.params.id && e.enterpriseId === req.user.id))
     return res.status(404).json({ error: 'Employé introuvable' });
-  write('employees', employees.filter(e => e.id !== req.params.id));
+  await write('employees', employees.filter(e => e.id !== req.params.id));
   res.json({ success: true });
 });
 
@@ -783,11 +784,11 @@ app.delete('/api/enterprise/employees/:id', auth, requireRole('enterprise'), (re
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Menus journaliers disponibles pour l'employé (tous restaurants affiliés)
-app.get('/api/employee/menus', auth, requireRole('employee'), (req, res) => {
-  const affiliations = read('affiliations').filter(a => a.enterpriseId === req.user.enterpriseId);
-  const restaurants  = read('restaurants').map(({ password, ...r }) => r);
-  const menus        = read('menus');
-  const dailyMenus   = read('dailyMenus');
+app.get('/api/employee/menus', auth, requireRole('employee'), async (req, res) => {
+  const affiliations = (await read('affiliations')).filter(a => a.enterpriseId === req.user.enterpriseId);
+  const restaurants  = (await read('restaurants')).map(({ password, ...r }) => r);
+  const menus        = await read('menus');
+  const dailyMenus   = await read('dailyMenus');
   const t            = todayStr();
 
   const result = affiliations.map(a => {
@@ -810,26 +811,25 @@ app.get('/api/employee/menus', auth, requireRole('employee'), (req, res) => {
 });
 
 // Créer un choix
-app.post('/api/choices', auth, requireRole('employee'), (req, res) => {
+app.post('/api/choices', auth, requireRole('employee'), async (req, res) => {
   const { restaurantId, foodItemId, drinkItemId } = req.body;
   if (!restaurantId) return res.status(400).json({ error: 'Restaurant requis' });
   if (!foodItemId && !drinkItemId) return res.status(400).json({ error: 'Sélectionnez au moins un plat ou une boisson' });
 
-  const aff = read('affiliations');
+  const aff = await read('affiliations');
   if (!aff.some(a => a.enterpriseId === req.user.enterpriseId && a.restaurantId === restaurantId))
     return res.status(403).json({ error: 'Restaurant non affilié à votre entreprise' });
 
   const t = todayStr();
-  const choices = read('choices');
+  const choices = await read('choices');
   const existing = choices.find(c => c.userId === req.user.id && c.date === t);
 
-  // If a choice already exists, allow update only within the 5-min lock window
   if (existing) {
     const elapsed = (Date.now() - new Date(existing.createdAt).getTime()) / 60000;
     if (elapsed > LOCK_MIN) return res.status(409).json({ error: 'Vous avez déjà fait votre choix aujourd\'hui' });
     if (existing.orderLaunched) return res.status(403).json({ error: 'La commande a déjà été lancée' });
 
-    const menu = read('menus').find(m => m.restaurantId === existing.restaurantId) || { items: [] };
+    const menu = (await read('menus')).find(m => m.restaurantId === existing.restaurantId) || { items: [] };
     if (foodItemId !== undefined) {
       if (foodItemId === null) { existing.foodItem = null; }
       else {
@@ -849,12 +849,12 @@ app.post('/api/choices', auth, requireRole('employee'), (req, res) => {
     if (!existing.foodItem && !existing.drinkItem)
       return res.status(400).json({ error: 'Sélectionnez au moins un plat ou une boisson' });
     existing.updatedAt = new Date().toISOString();
-    write('choices', choices);
+    await write('choices', choices);
     sseNotify(existing.restaurantId, 'update_choice', { choice: existing });
     return res.json(existing);
   }
 
-  const menu = read('menus').find(m => m.restaurantId === restaurantId) || { items: [] };
+  const menu = (await read('menus')).find(m => m.restaurantId === restaurantId) || { items: [] };
   let foodItem = null, drinkItem = null;
 
   if (foodItemId) {
@@ -868,7 +868,7 @@ app.post('/api/choices', auth, requireRole('employee'), (req, res) => {
     drinkItem = { id: item.id, name: item.name, price: item.price };
   }
 
-  const restaurant = read('restaurants').find(r => r.id === restaurantId);
+  const restaurant = (await read('restaurants')).find(r => r.id === restaurantId);
   const choice = {
     id: uid(),
     userId: req.user.id,
@@ -887,15 +887,15 @@ app.post('/api/choices', auth, requireRole('employee'), (req, res) => {
   };
 
   choices.push(choice);
-  write('choices', choices);
+  await write('choices', choices);
   sseNotify(restaurantId, 'new_choice', { choice });
 
   res.status(201).json(choice);
 });
 
 // Modifier un choix (5 minutes)
-app.put('/api/choices/:id', auth, requireRole('employee'), (req, res) => {
-  const choices = read('choices');
+app.put('/api/choices/:id', auth, requireRole('employee'), async (req, res) => {
+  const choices = await read('choices');
   const idx = choices.findIndex(c => c.id === req.params.id && c.userId === req.user.id);
   if (idx === -1) return res.status(404).json({ error: 'Choix introuvable' });
 
@@ -905,7 +905,7 @@ app.put('/api/choices/:id', auth, requireRole('employee'), (req, res) => {
   if (choice.orderLaunched) return res.status(403).json({ error: 'La commande a déjà été lancée' });
 
   const { foodItemId, drinkItemId } = req.body;
-  const menu = read('menus').find(m => m.restaurantId === choice.restaurantId) || { items: [] };
+  const menu = (await read('menus')).find(m => m.restaurantId === choice.restaurantId) || { items: [] };
 
   if (foodItemId !== undefined) {
     if (foodItemId === null) {
@@ -930,20 +930,20 @@ app.put('/api/choices/:id', auth, requireRole('employee'), (req, res) => {
 
   choice.updatedAt = new Date().toISOString();
 
-  write('choices', choices);
+  await write('choices', choices);
   res.json(choice);
 });
 
 // Vider le cache historique (employé — hors aujourd'hui) — AVANT /:id
-app.delete('/api/choices/history', auth, requireRole('employee'), (req, res) => {
+app.delete('/api/choices/history', auth, requireRole('employee'), async (req, res) => {
   const t = todayStr();
-  write('choices', read('choices').filter(c => !(c.userId === req.user.id && c.date !== t)));
+  await write('choices', (await read('choices')).filter(c => !(c.userId === req.user.id && c.date !== t)));
   res.json({ success: true });
 });
 
 // Supprimer un choix (5 minutes)
-app.delete('/api/choices/:id', auth, requireRole('employee'), (req, res) => {
-  const choices = read('choices');
+app.delete('/api/choices/:id', auth, requireRole('employee'), async (req, res) => {
+  const choices = await read('choices');
   const choice = choices.find(c => c.id === req.params.id && c.userId === req.user.id);
   if (!choice) return res.status(404).json({ error: 'Choix introuvable' });
 
@@ -951,21 +951,21 @@ app.delete('/api/choices/:id', auth, requireRole('employee'), (req, res) => {
   if (elapsed > LOCK_MIN) return res.status(403).json({ error: `Délai de suppression dépassé (${LOCK_MIN} min)` });
   if (choice.orderLaunched) return res.status(403).json({ error: 'La commande a déjà été lancée' });
 
-  write('choices', choices.filter(c => c.id !== req.params.id));
+  await write('choices', choices.filter(c => c.id !== req.params.id));
   res.json({ success: true });
 });
 
 // Mon choix aujourd'hui
-app.get('/api/choices/mine', auth, requireRole('employee'), (req, res) => {
+app.get('/api/choices/mine', auth, requireRole('employee'), async (req, res) => {
   const t = todayStr();
-  const choice = read('choices').find(c => c.userId === req.user.id && c.date === t) || null;
+  const choice = (await read('choices')).find(c => c.userId === req.user.id && c.date === t) || null;
   res.json(choice);
 });
 
 // Choix du jour (filtré par rôle)
-app.get('/api/choices/today', auth, (req, res) => {
+app.get('/api/choices/today', auth, async (req, res) => {
   const t = todayStr();
-  let choices = read('choices').filter(c => c.date === t);
+  let choices = (await read('choices')).filter(c => c.date === t);
   if (req.user.role === 'employee')     choices = choices.filter(c => c.userId === req.user.id);
   else if (req.user.role === 'enterprise') choices = choices.filter(c => c.enterpriseId === req.user.id);
   else if (req.user.role === 'restauratrice') choices = choices.filter(c => c.restaurantId === req.user.id);
@@ -973,20 +973,20 @@ app.get('/api/choices/today', auth, (req, res) => {
 });
 
 // Noter un plat (1-5 étoiles)
-app.post('/api/choices/:id/rate', auth, requireRole('employee'), (req, res) => {
+app.post('/api/choices/:id/rate', auth, requireRole('employee'), async (req, res) => {
   const { stars } = req.body;
   const s = Number(stars);
   if (!s || s < 1 || s > 5) return res.status(400).json({ error: 'Note invalide (1 à 5 étoiles)' });
 
-  const choices = read('choices');
+  const choices = await read('choices');
   const idx = choices.findIndex(c => c.id === req.params.id && c.userId === req.user.id);
   if (idx === -1) return res.status(404).json({ error: 'Choix introuvable' });
 
   choices[idx].rating = s;
-  write('choices', choices);
+  await write('choices', choices);
 
   const choice = choices[idx];
-  const ratings = read('ratings');
+  const ratings = await read('ratings');
   ratings.push({
     id: uid(),
     employeeId:     req.user.id,
@@ -1000,19 +1000,20 @@ app.post('/api/choices/:id/rate', auth, requireRole('employee'), (req, res) => {
     stars: s, date: choice.date,
     createdAt: new Date().toISOString(),
   });
-  write('ratings', ratings);
+  await write('ratings', ratings);
 
   const starEmoji = '⭐'.repeat(s);
-  pushNotif(choice.restaurantId, 'restauratrice', 'new_rating', 'Nouvelle évaluation',
-    `${req.user.fullName} de ${req.user.enterpriseName} vous a noté ${starEmoji} pour "${choice.foodItem?.name || 'votre service'}".`,
+  const platName  = choice.foodItem?.name || choice.drinkItem?.name || 'votre service';
+  await pushNotif(choice.restaurantId, 'restauratrice', 'new_rating', 'Nouvelle évaluation',
+    `${req.user.fullName} (${req.user.enterpriseName || 'Employé'}) note votre plat "${platName}" ${starEmoji} (${s}/5).`,
     { stars: s, employeeId: req.user.id, enterpriseId: req.user.enterpriseId });
 
   res.json(choices[idx]);
 });
 
 // Historique des choix
-app.get('/api/choices/history', auth, (req, res) => {
-  let choices = read('choices');
+app.get('/api/choices/history', auth, async (req, res) => {
+  let choices = await read('choices');
   if (req.user.role === 'employee')      choices = choices.filter(c => c.userId === req.user.id);
   else if (req.user.role === 'enterprise') choices = choices.filter(c => c.enterpriseId === req.user.id);
   else if (req.user.role === 'restauratrice') choices = choices.filter(c => c.restaurantId === req.user.id);
@@ -1023,25 +1024,28 @@ app.get('/api/choices/history', auth, (req, res) => {
 // COMMANDES (ORDERS)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Soumettre une commande
-app.post('/api/orders', auth, requireRole('enterprise'), (req, res) => {
-  const { restaurantId, paymentMode, depositScreenshot, depositType } = req.body;
-  if (!restaurantId || !paymentMode) return res.status(400).json({ error: 'Restaurant et mode de paiement requis' });
-  if (!['delivery', 'upfront'].includes(paymentMode)) return res.status(400).json({ error: 'Mode de paiement invalide' });
+// Soumettre une commande (lancer la commande)
+app.post('/api/orders', auth, requireRole('enterprise'), async (req, res) => {
+  const { restaurantId } = req.body;
+  if (!restaurantId) return res.status(400).json({ error: 'Restaurant requis' });
 
   const t = todayStr();
-  const todayChoices = read('choices').filter(c =>
+  const todayChoices = (await read('choices')).filter(c =>
     c.enterpriseId === req.user.id && c.restaurantId === restaurantId && c.date === t && !c.orderLaunched
   );
   if (!todayChoices.length) return res.status(400).json({ error: 'Aucun choix non soumis pour ce restaurant aujourd\'hui' });
 
-  const restaurant = read('restaurants').find(r => r.id === restaurantId);
+  const restaurant = (await read('restaurants')).find(r => r.id === restaurantId);
   let totalAmount = 0;
   const items = todayChoices.map(c => {
     const amount = (c.foodItem?.price || 0) + (c.drinkItem?.price || 0);
     totalAmount += amount;
     return { employeeId: c.userId, employeeName: c.userName, foodItem: c.foodItem, drinkItem: c.drinkItem, amount };
   });
+
+  const activeSub = (await read('subscriptions')).find(s =>
+    s.enterpriseId === req.user.id && s.restaurantId === restaurantId && s.status === 'accepted'
+  );
 
   const order = {
     id: uid(),
@@ -1050,37 +1054,33 @@ app.post('/api/orders', auth, requireRole('enterprise'), (req, res) => {
     restaurantId,
     restaurantName: restaurant?.restaurantName || '',
     date: t, items, totalAmount,
-    paymentMode,
-    depositScreenshot: paymentMode === 'upfront' ? (depositScreenshot || null) : null,
-    depositType: paymentMode === 'upfront' ? (depositType || null) : null,
+    paymentMode: 'delivery',
+    subscriptionId: activeSub?.id || null,
     status: 'pending',
     createdAt: new Date().toISOString(),
   };
 
-  const orders = read('orders');
+  const orders = await read('orders');
   orders.push(order);
-  write('orders', orders);
+  await write('orders', orders);
 
-  // Verrouiller les choix
-  const allChoices = read('choices').map(c => {
+  const allChoices = (await read('choices')).map(c => {
     if (c.enterpriseId === req.user.id && c.restaurantId === restaurantId && c.date === t)
       return { ...c, orderLaunched: true };
     return c;
   });
-  write('choices', allChoices);
+  await write('choices', allChoices);
 
-  pushNotif(restaurantId, 'restauratrice', 'new_order', 'Nouvelle commande',
+  await pushNotif(restaurantId, 'restauratrice', 'new_order', 'Nouvelle commande',
     `${req.user.companyName} vient de passer une commande de ${items.length} repas. Total: ${totalAmount.toLocaleString('fr-FR')} FCFA.`,
     { orderId: order.id, enterpriseId: req.user.id });
 
-  // Ne pas renvoyer le screenshot dans la réponse (accessible uniquement par admin)
-  const { depositScreenshot: _ds, ...orderSafe } = order;
-  res.status(201).json(orderSafe);
+  res.status(201).json(order);
 });
 
 // Lister les commandes (sans screenshot)
-app.get('/api/orders', auth, (req, res) => {
-  let orders = read('orders');
+app.get('/api/orders', auth, async (req, res) => {
+  let orders = await read('orders');
   if (req.user.role === 'enterprise')   orders = orders.filter(o => o.enterpriseId === req.user.id);
   else if (req.user.role === 'restauratrice') orders = orders.filter(o => o.restaurantId === req.user.id);
   res.json(orders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
@@ -1088,42 +1088,148 @@ app.get('/api/orders', auth, (req, res) => {
 });
 
 // Mettre à jour le statut d'une commande (restaurant)
-app.put('/api/orders/:id/status', auth, requireRole('restauratrice'), (req, res) => {
+app.put('/api/orders/:id/status', auth, requireRole('restauratrice'), async (req, res) => {
   const { status } = req.body;
   if (!['confirmed', 'preparing', 'delivered', 'cancelled'].includes(status))
     return res.status(400).json({ error: 'Statut invalide' });
 
-  const orders = read('orders');
+  const orders = await read('orders');
   const idx = orders.findIndex(o => o.id === req.params.id && o.restaurantId === req.user.id);
   if (idx === -1) return res.status(404).json({ error: 'Commande introuvable' });
 
   orders[idx].status = status;
   orders[idx].updatedAt = new Date().toISOString();
-  write('orders', orders);
+  await write('orders', orders);
 
-  const labels = { confirmed: 'confirmée', preparing: 'en préparation', delivered: 'livrée', cancelled: 'annulée' };
-  pushNotif(orders[idx].enterpriseId, 'enterprise', 'order_status', 'Statut de commande',
-    `Votre commande chez ${req.user.restaurantName} est ${labels[status]}.`,
+  const messages = {
+    confirmed: `${req.user.restaurantName} a accusé réception de votre commande (${orders[idx].items?.length || 0} repas).`,
+    preparing: `Votre commande chez ${req.user.restaurantName} est en cours de préparation.`,
+    delivered: `Votre commande chez ${req.user.restaurantName} a été livrée. Bon appétit !`,
+    cancelled: `Votre commande chez ${req.user.restaurantName} a été annulée.`,
+  };
+  await pushNotif(orders[idx].enterpriseId, 'enterprise', 'order_status',
+    status === 'confirmed' ? 'Réception accusée' : 'Statut de commande',
+    messages[status] || `Commande mise à jour : ${status}.`,
     { orderId: req.params.id, status });
 
   res.json(orders[idx]);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// FACTURES (INVOICES)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Créer une facture (restaurant pour une entreprise)
+app.post('/api/invoices', auth, requireRole('restauratrice'), async (req, res) => {
+  const { orderId, frequency } = req.body;
+  if (!orderId) return res.status(400).json({ error: 'orderId requis' });
+
+  const orders = await read('orders');
+  const order  = orders.find(o => o.id === orderId && o.restaurantId === req.user.id);
+  if (!order) return res.status(404).json({ error: 'Commande introuvable' });
+
+  const existingInvoices = await read('invoices');
+  if (existingInvoices.find(i => i.orderId === orderId))
+    return res.status(409).json({ error: 'Facture déjà générée pour cette commande' });
+
+  const restaurant  = (await read('restaurants')).find(r => r.id === req.user.id) || {};
+  const enterprises = await read('enterprises');
+  const enterprise  = enterprises.find(e => e.id === order.enterpriseId) || {};
+
+  // Agréger les articles
+  const itemMap = {};
+  (order.items || []).forEach(it => {
+    if (it.foodItem)  { const k = it.foodItem.name;  itemMap[k] = { name: k, qty: (itemMap[k]?.qty||0)+1, unitPrice: it.foodItem.price||0 }; }
+    if (it.drinkItem) { const k = it.drinkItem.name; itemMap[k] = { name: k, qty: (itemMap[k]?.qty||0)+1, unitPrice: it.drinkItem.price||0 }; }
+  });
+  const items = Object.values(itemMap).map(i => ({ ...i, total: i.qty * i.unitPrice }));
+
+  const now  = new Date();
+  const dateStr = now.toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+  const dateISO = now.toISOString().slice(0, 10);
+  const invId   = uid();
+  const invNum  = `FACT-${dateISO.replace(/-/g,'')}-${invId.slice(0,6).toUpperCase()}`;
+
+  const invoice = {
+    id: invId, number: invNum,
+    restaurantId: req.user.id, restaurantName: req.user.restaurantName,
+    enterpriseId: order.enterpriseId, enterpriseName: order.enterpriseName,
+    orderId, date: dateISO, items,
+    totalAmount: order.totalAmount || 0,
+    frequency: frequency || 'monthly',
+    status: 'sent',
+    createdAt: now.toISOString(),
+  };
+
+  try {
+    const buf  = await buildInvoicePDF(invoice, restaurant, enterprise, invNum, dateStr);
+    invoice.pdfBase64 = buf.toString('base64');
+  } catch (e) {
+    console.error('PDF invoice error:', e.message);
+  }
+
+  existingInvoices.push(invoice);
+  await write('invoices', existingInvoices);
+
+  await pushNotif(order.enterpriseId, 'enterprise', 'new_invoice', '🧾 Nouvelle facture',
+    `${req.user.restaurantName} vous a envoyé une facture de ${(order.totalAmount||0).toLocaleString('fr-FR')} FCFA (commande du ${order.date}).`,
+    { invoiceId: invId, invoiceNumber: invNum });
+
+  const { pdfBase64: _, ...safe } = invoice;
+  res.status(201).json(safe);
+});
+
+// Lister les factures
+app.get('/api/invoices', auth, requireRole('enterprise', 'restauratrice'), async (req, res) => {
+  let invoices = await read('invoices');
+  if (req.user.role === 'enterprise')    invoices = invoices.filter(i => i.enterpriseId === req.user.id);
+  if (req.user.role === 'restauratrice') invoices = invoices.filter(i => i.restaurantId === req.user.id);
+  res.json(invoices.sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt))
+    .map(({ pdfBase64: _, ...i }) => i));
+});
+
+// Télécharger le PDF d'une facture
+app.get('/api/invoices/:id/pdf', auth, requireRole('enterprise', 'restauratrice'), async (req, res) => {
+  const inv = (await read('invoices')).find(i => i.id === req.params.id &&
+    (i.enterpriseId === req.user.id || i.restaurantId === req.user.id));
+  if (!inv) return res.status(404).json({ error: 'Facture introuvable' });
+  if (!inv.pdfBase64) return res.status(404).json({ error: 'PDF non disponible' });
+  const buf = Buffer.from(inv.pdfBase64, 'base64');
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${inv.number}.pdf"`);
+  res.setHeader('Content-Length', buf.length);
+  res.send(buf);
+});
+
+// Confirmer réception d'une facture (enterprise)
+app.put('/api/invoices/:id/confirm', auth, requireRole('enterprise'), async (req, res) => {
+  const invoices = await read('invoices');
+  const idx = invoices.findIndex(i => i.id === req.params.id && i.enterpriseId === req.user.id);
+  if (idx === -1) return res.status(404).json({ error: 'Facture introuvable' });
+  invoices[idx].status      = 'confirmed';
+  invoices[idx].confirmedAt = new Date().toISOString();
+  await write('invoices', invoices);
+  await pushNotif(invoices[idx].restaurantId, 'restauratrice', 'invoice_confirmed', '✅ Facture confirmée',
+    `${req.user.companyName} a confirmé la réception de la facture ${invoices[idx].number}.`,
+    { invoiceId: invoices[idx].id });
+  res.json(invoices[idx]);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ABONNEMENTS
 // ─────────────────────────────────────────────────────────────────────────────
 
-app.post('/api/subscriptions', auth, requireRole('enterprise'), (req, res) => {
+app.post('/api/subscriptions', auth, requireRole('enterprise'), async (req, res) => {
   const { restaurantId, frequency } = req.body;
   const valid = ['weekly', 'monthly', 'quarterly', 'semi-annual', 'annual'];
   if (!restaurantId || !valid.includes(frequency))
     return res.status(400).json({ error: 'Restaurant et fréquence valide requis' });
 
-  const subs = read('subscriptions');
+  const subs = await read('subscriptions');
   if (subs.find(s => s.enterpriseId === req.user.id && s.restaurantId === restaurantId && s.status === 'pending'))
     return res.status(409).json({ error: 'Une demande est déjà en attente' });
 
-  const restaurant = read('restaurants').find(r => r.id === restaurantId);
+  const restaurant = (await read('restaurants')).find(r => r.id === restaurantId);
   const sub = {
     id: uid(),
     enterpriseId: req.user.id, enterpriseName: req.user.companyName,
@@ -1132,76 +1238,145 @@ app.post('/api/subscriptions', auth, requireRole('enterprise'), (req, res) => {
     createdAt: new Date().toISOString(),
   };
   subs.push(sub);
-  write('subscriptions', subs);
+  await write('subscriptions', subs);
 
   const labels = { weekly: 'hebdomadaire', monthly: 'mensuel', quarterly: 'trimestriel', 'semi-annual': 'semestriel', annual: 'annuel' };
-  pushNotif(restaurantId, 'restauratrice', 'subscription_request', 'Demande d\'abonnement',
+  await pushNotif(restaurantId, 'restauratrice', 'subscription_request', 'Demande d\'abonnement',
     `${req.user.companyName} demande un abonnement ${labels[frequency]}.`,
     { subscriptionId: sub.id });
 
   res.status(201).json(sub);
 });
 
-app.put('/api/subscriptions/:id', auth, requireRole('restauratrice'), (req, res) => {
+app.put('/api/subscriptions/:id', auth, requireRole('restauratrice'), async (req, res) => {
   const { status } = req.body;
   if (!['accepted', 'declined'].includes(status)) return res.status(400).json({ error: 'Statut invalide' });
 
-  const subs = read('subscriptions');
+  const subs = await read('subscriptions');
   const idx = subs.findIndex(s => s.id === req.params.id && s.restaurantId === req.user.id);
   if (idx === -1) return res.status(404).json({ error: 'Abonnement introuvable' });
 
   subs[idx].status = status;
   subs[idx].updatedAt = new Date().toISOString();
-  write('subscriptions', subs);
+  if (status === 'accepted') subs[idx].acceptedAt = new Date().toISOString();
+  await write('subscriptions', subs);
 
   const label = status === 'accepted' ? 'accepté' : 'décliné';
-  pushNotif(subs[idx].enterpriseId, 'enterprise', 'subscription_response', 'Réponse à votre demande',
+  await pushNotif(subs[idx].enterpriseId, 'enterprise', 'subscription_response', 'Réponse à votre demande',
     `${req.user.restaurantName} a ${label} votre demande d'abonnement.`,
     { subscriptionId: req.params.id, status });
 
   res.json(subs[idx]);
 });
 
-app.get('/api/subscriptions', auth, (req, res) => {
-  let subs = read('subscriptions');
+app.get('/api/subscriptions', auth, async (req, res) => {
+  let subs = await read('subscriptions');
   if (req.user.role === 'enterprise')   subs = subs.filter(s => s.enterpriseId === req.user.id);
   else if (req.user.role === 'restauratrice') subs = subs.filter(s => s.restaurantId === req.user.id);
   res.json(subs.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
+});
+
+// Générer une facture globale pour un abonnement (restaurant)
+app.post('/api/subscriptions/:id/invoice', auth, requireRole('restauratrice'), async (req, res) => {
+  const subs = await read('subscriptions');
+  const sub  = subs.find(s => s.id === req.params.id && s.restaurantId === req.user.id);
+  if (!sub) return res.status(404).json({ error: 'Abonnement introuvable' });
+  if (sub.status !== 'accepted') return res.status(400).json({ error: "L'abonnement n'est pas actif" });
+
+  const existingInvoices = await read('invoices');
+  if (existingInvoices.find(i => i.subscriptionId === sub.id))
+    return res.status(409).json({ error: 'Une facture a déjà été générée pour cet abonnement' });
+
+  const orders = (await read('orders')).filter(o =>
+    o.enterpriseId === sub.enterpriseId && o.restaurantId === req.user.id
+  );
+  if (!orders.length) return res.status(400).json({ error: "Aucune commande trouvée pour cette période d'abonnement" });
+
+  const itemMap    = {};
+  let totalAmount  = 0;
+  orders.forEach(o => {
+    totalAmount += o.totalAmount || 0;
+    (o.items || []).forEach(it => {
+      if (it.foodItem)  { const k = it.foodItem.name;  itemMap[k] = { name: k, qty: (itemMap[k]?.qty||0)+1, unitPrice: it.foodItem.price||0 }; }
+      if (it.drinkItem) { const k = it.drinkItem.name; itemMap[k] = { name: k, qty: (itemMap[k]?.qty||0)+1, unitPrice: it.drinkItem.price||0 }; }
+    });
+  });
+  const items = Object.values(itemMap).map(i => ({ ...i, total: i.qty * i.unitPrice }));
+
+  const restaurant = (await read('restaurants')).find(r => r.id === req.user.id) || {};
+  const enterprise = (await read('enterprises')).find(e => e.id === sub.enterpriseId) || {};
+
+  const now     = new Date();
+  const dateStr = now.toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+  const dateISO = now.toISOString().slice(0, 10);
+  const invId   = uid();
+  const invNum  = `FACT-${dateISO.replace(/-/g,'')}-${invId.slice(0,6).toUpperCase()}`;
+
+  const freqLabels = { weekly: 'hebdomadaire', monthly: 'mensuel', quarterly: 'trimestriel', 'semi-annual': 'semestriel', annual: 'annuel' };
+
+  const invoice = {
+    id: invId, number: invNum,
+    restaurantId:   req.user.id, restaurantName: req.user.restaurantName,
+    enterpriseId:   sub.enterpriseId, enterpriseName: sub.enterpriseName,
+    subscriptionId: sub.id,
+    orderId: orders.map(o => o.id).join(','),
+    date: dateISO, items, totalAmount,
+    frequency: sub.frequency,
+    status: 'sent',
+    createdAt: now.toISOString(),
+  };
+
+  try {
+    const buf = await buildInvoicePDF(invoice, restaurant, enterprise, invNum, dateStr);
+    invoice.pdfBase64 = buf.toString('base64');
+  } catch (e) {
+    console.error('[Invoice] PDF error:', e.message);
+  }
+
+  existingInvoices.push(invoice);
+  await write('invoices', existingInvoices);
+
+  await pushNotif(sub.enterpriseId, 'enterprise', 'new_invoice', '🧾 Facture d\'abonnement',
+    `${req.user.restaurantName} vous a envoyé une facture d'abonnement ${freqLabels[sub.frequency]||sub.frequency} de ${totalAmount.toLocaleString('fr-FR')} FCFA.`,
+    { invoiceId: invId, invoiceNumber: invNum, subscriptionId: sub.id });
+
+  const { pdfBase64: _, ...safe } = invoice;
+  res.status(201).json(safe);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NOTIFICATIONS
 // ─────────────────────────────────────────────────────────────────────────────
 
-app.get('/api/notifications', auth, (req, res) => {
-  const notifs = read('notifications')
+app.get('/api/notifications', auth, async (req, res) => {
+  const notifs = (await read('notifications'))
     .filter(n => n.userId === req.user.id)
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   res.json(notifs);
 });
 
-app.put('/api/notifications/read-all', auth, (req, res) => {
-  const notifs = read('notifications').map(n => n.userId === req.user.id ? { ...n, read: true } : n);
-  write('notifications', notifs);
+app.put('/api/notifications/read-all', auth, async (req, res) => {
+  const notifs = (await read('notifications')).map(n => n.userId === req.user.id ? { ...n, read: true } : n);
+  await write('notifications', notifs);
   res.json({ success: true });
 });
 
-app.put('/api/notifications/:id/read', auth, (req, res) => {
-  const notifs = read('notifications');
+app.put('/api/notifications/:id/read', auth, async (req, res) => {
+  const notifs = await read('notifications');
   const idx = notifs.findIndex(n => n.id === req.params.id && n.userId === req.user.id);
   if (idx === -1) return res.status(404).json({ error: 'Notification introuvable' });
   notifs[idx].read = true;
-  write('notifications', notifs);
+  await write('notifications', notifs);
   res.json(notifs[idx]);
 });
 
-app.delete('/api/notifications/:id', auth, (req, res) => {
-  write('notifications', read('notifications').filter(n => !(n.id === req.params.id && n.userId === req.user.id)));
+app.delete('/api/notifications/:id', auth, async (req, res) => {
+  await write('notifications', (await read('notifications')).filter(n => !(n.id === req.params.id && n.userId === req.user.id)));
   res.json({ success: true });
 });
 
-app.delete('/api/notifications', auth, (req, res) => {
-  write('notifications', read('notifications').filter(n => n.userId !== req.user.id));
+app.delete('/api/notifications', auth, async (req, res) => {
+  await write('notifications', (await read('notifications')).filter(n => n.userId !== req.user.id));
   res.json({ success: true });
 });
 
@@ -1210,12 +1385,12 @@ app.delete('/api/notifications', auth, (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Stats entreprise
-app.get('/api/stats/enterprise', auth, requireRole('enterprise'), (req, res) => {
+app.get('/api/stats/enterprise', auth, requireRole('enterprise'), async (req, res) => {
   const { frequency } = req.query;
   const start = getStartDate(frequency);
 
-  const choices = read('choices').filter(c => c.enterpriseId === req.user.id && new Date(c.date) >= start);
-  const orders  = read('orders').filter(o => o.enterpriseId === req.user.id && new Date(o.createdAt) >= start);
+  const choices = (await read('choices')).filter(c => c.enterpriseId === req.user.id && new Date(c.date) >= start);
+  const orders  = (await read('orders')).filter(o => o.enterpriseId === req.user.id && new Date(o.createdAt) >= start);
 
   const foodCounts = {}, drinkCounts = {};
   choices.forEach(c => {
@@ -1225,7 +1400,7 @@ app.get('/api/stats/enterprise', auth, requireRole('enterprise'), (req, res) => 
 
   const totalBudget = orders.reduce((s, o) => s + (o.totalAmount || 0), 0);
 
-  const employees = read('employees').filter(e => e.enterpriseId === req.user.id);
+  const employees = (await read('employees')).filter(e => e.enterpriseId === req.user.id);
   const employeeStats = employees.map(({ password, ...e }) => ({
     ...e, choicesCount: choices.filter(c => c.userId === e.id).length,
   }));
@@ -1234,12 +1409,12 @@ app.get('/api/stats/enterprise', auth, requireRole('enterprise'), (req, res) => 
 });
 
 // Stats restaurant
-app.get('/api/stats/restaurant', auth, requireRole('restauratrice'), (req, res) => {
+app.get('/api/stats/restaurant', auth, requireRole('restauratrice'), async (req, res) => {
   const { frequency } = req.query;
   const start = getStartDate(frequency);
 
-  const orders  = read('orders').filter(o => o.restaurantId === req.user.id && new Date(o.createdAt) >= start);
-  const ratings = read('ratings').filter(r => r.restaurantId === req.user.id && new Date(r.createdAt) >= start);
+  const orders  = (await read('orders')).filter(o => o.restaurantId === req.user.id && new Date(o.createdAt) >= start);
+  const ratings = (await read('ratings')).filter(r => r.restaurantId === req.user.id && new Date(r.createdAt) >= start);
 
   const totalRevenue = orders.reduce((s, o) => s + (o.totalAmount || 0), 0);
 
@@ -1269,28 +1444,27 @@ app.get('/api/stats/restaurant', auth, requireRole('restauratrice'), (req, res) 
 // ADMIN
 // ─────────────────────────────────────────────────────────────────────────────
 
-app.get('/api/admin/enterprises', auth, requireRole('superadmin'), (req, res) => {
-  res.json(read('enterprises').map(({ password, ...e }) => e));
+app.get('/api/admin/enterprises', auth, requireRole('superadmin'), async (req, res) => {
+  res.json((await read('enterprises')).map(({ password, ...e }) => e));
 });
 
-app.get('/api/admin/restaurants', auth, requireRole('superadmin'), (req, res) => {
-  res.json(read('restaurants').map(({ password, ...r }) => r));
+app.get('/api/admin/restaurants', auth, requireRole('superadmin'), async (req, res) => {
+  res.json((await read('restaurants')).map(({ password, ...r }) => r));
 });
 
-app.get('/api/admin/employees', auth, requireRole('superadmin'), (req, res) => {
-  res.json(read('employees').map(({ password, ...e }) => e));
+app.get('/api/admin/employees', auth, requireRole('superadmin'), async (req, res) => {
+  res.json((await read('employees')).map(({ password, ...e }) => e));
 });
 
-app.get('/api/admin/stats', auth, requireRole('superadmin'), (req, res) => {
+app.get('/api/admin/stats', auth, requireRole('superadmin'), async (req, res) => {
   const { frequency } = req.query;
   const start = getStartDate(frequency);
 
-  const enterprises = read('enterprises');
-  const restaurants = read('restaurants');
-  const employees   = read('employees');
-  const choices     = read('choices').filter(c => new Date(c.date) >= start);
-  // Admin does NOT see deposit screenshots
-  const orders = read('orders')
+  const enterprises = await read('enterprises');
+  const restaurants = await read('restaurants');
+  const employees   = await read('employees');
+  const choices     = (await read('choices')).filter(c => new Date(c.date) >= start);
+  const orders = (await read('orders'))
     .filter(o => new Date(o.createdAt) >= start)
     .map(({ depositScreenshot, ...o }) => o);
 
@@ -1323,35 +1497,33 @@ app.get('/api/admin/stats', auth, requireRole('superadmin'), (req, res) => {
   });
 });
 
-// Commandes avec screenshot (admin uniquement)
-app.get('/api/admin/orders', auth, requireRole('superadmin'), (req, res) => {
-  res.json(read('orders').sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
+app.get('/api/admin/orders', auth, requireRole('superadmin'), async (req, res) => {
+  res.json((await read('orders')).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
 });
 
-// Screenshot d'un dépôt spécifique (admin uniquement)
-app.get('/api/admin/orders/:id/screenshot', auth, requireRole('superadmin'), (req, res) => {
-  const order = read('orders').find(o => o.id === req.params.id);
+app.get('/api/admin/orders/:id/screenshot', auth, requireRole('superadmin'), async (req, res) => {
+  const order = (await read('orders')).find(o => o.id === req.params.id);
   if (!order) return res.status(404).json({ error: 'Commande introuvable' });
   if (!order.depositScreenshot)
     return res.status(404).json({ error: 'Aucun screenshot pour cette commande' });
   res.json({ depositScreenshot: order.depositScreenshot, depositType: order.depositType });
 });
 
-app.get('/api/admin/deletion-requests', auth, requireRole('superadmin'), (req, res) => {
-  res.json(read('deletionRequests').sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt)));
+app.get('/api/admin/deletion-requests', auth, requireRole('superadmin'), async (req, res) => {
+  res.json((await read('deletionRequests')).sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt)));
 });
 
-app.delete('/api/admin/users/:type/:id', auth, requireRole('superadmin'), (req, res) => {
+app.delete('/api/admin/users/:type/:id', auth, requireRole('superadmin'), async (req, res) => {
   const { type, id } = req.params;
   if (type === 'enterprise') {
-    write('enterprises', read('enterprises').filter(e => e.id !== id));
-    write('employees', read('employees').filter(e => e.enterpriseId !== id));
-    write('affiliations', read('affiliations').filter(a => a.enterpriseId !== id));
+    await write('enterprises', (await read('enterprises')).filter(e => e.id !== id));
+    await write('employees', (await read('employees')).filter(e => e.enterpriseId !== id));
+    await write('affiliations', (await read('affiliations')).filter(a => a.enterpriseId !== id));
   } else if (type === 'restaurant') {
-    write('restaurants', read('restaurants').filter(r => r.id !== id));
-    write('affiliations', read('affiliations').filter(a => a.restaurantId !== id));
+    await write('restaurants', (await read('restaurants')).filter(r => r.id !== id));
+    await write('affiliations', (await read('affiliations')).filter(a => a.restaurantId !== id));
   } else if (type === 'employee') {
-    write('employees', read('employees').filter(e => e.id !== id));
+    await write('employees', (await read('employees')).filter(e => e.id !== id));
   } else {
     return res.status(400).json({ error: 'Type invalide' });
   }
@@ -1371,10 +1543,10 @@ app.delete('/api/account', auth, async (req, res) => {
 
   let user, type;
   if (req.user.role === 'enterprise') {
-    user = read('enterprises').find(e => e.id === req.user.id);
+    user = (await read('enterprises')).find(e => e.id === req.user.id);
     type = 'enterprise';
   } else {
-    user = read('restaurants').find(r => r.id === req.user.id);
+    user = (await read('restaurants')).find(r => r.id === req.user.id);
     type = 'restaurant';
   }
 
@@ -1383,7 +1555,7 @@ app.delete('/api/account', auth, async (req, res) => {
   const valid = await bcrypt.compare(password, user.password);
   if (!valid) return res.status(400).json({ error: 'Mot de passe incorrect' });
 
-  const reqs = read('deletionRequests');
+  const reqs = await read('deletionRequests');
   reqs.push({
     id: uid(),
     userId: req.user.id,
@@ -1395,15 +1567,15 @@ app.delete('/api/account', auth, async (req, res) => {
     badExperience: badExperience || '',
     deletedAt: new Date().toISOString(),
   });
-  write('deletionRequests', reqs);
+  await write('deletionRequests', reqs);
 
   if (type === 'enterprise') {
-    write('enterprises', read('enterprises').filter(e => e.id !== req.user.id));
-    write('employees', read('employees').filter(e => e.enterpriseId !== req.user.id));
-    write('affiliations', read('affiliations').filter(a => a.enterpriseId !== req.user.id));
+    await write('enterprises', (await read('enterprises')).filter(e => e.id !== req.user.id));
+    await write('employees', (await read('employees')).filter(e => e.enterpriseId !== req.user.id));
+    await write('affiliations', (await read('affiliations')).filter(a => a.enterpriseId !== req.user.id));
   } else {
-    write('restaurants', read('restaurants').filter(r => r.id !== req.user.id));
-    write('affiliations', read('affiliations').filter(a => a.restaurantId !== req.user.id));
+    await write('restaurants', (await read('restaurants')).filter(r => r.id !== req.user.id));
+    await write('affiliations', (await read('affiliations')).filter(a => a.restaurantId !== req.user.id));
   }
 
   res.json({ success: true, message: 'Votre compte a été supprimé avec succès.' });
@@ -1426,8 +1598,8 @@ const MAX_AUDIO_MB = 10;
 const MAX_AUDIO_BYTES = MAX_AUDIO_MB * 1024 * 1024;
 
 // Qui peut parler à qui : entreprise ↔ restaurant affiliés
-function canMessage(req, otherId) {
-  const affiliations = read('affiliations');
+async function canMessage(req, otherId) {
+  const affiliations = await read('affiliations');
   if (req.user.role === 'enterprise') {
     return affiliations.some(a => a.enterpriseId === req.user.id && a.restaurantId === otherId);
   }
@@ -1437,23 +1609,23 @@ function canMessage(req, otherId) {
   return false;
 }
 
-function resolveDisplayName(id, role) {
+async function resolveDisplayName(id, role) {
   if (role === 'enterprise') {
-    const e = read('enterprises').find(e => e.id === id);
+    const e = (await read('enterprises')).find(e => e.id === id);
     return e ? e.companyName : 'Entreprise';
   }
   if (role === 'restauratrice') {
-    const r = read('restaurants').find(r => r.id === id);
+    const r = (await read('restaurants')).find(r => r.id === id);
     return r ? r.restaurantName : 'Restaurant';
   }
   return 'Inconnu';
 }
 
 // Liste des conversations (interlocuteurs uniques)
-app.get('/api/messages/conversations', auth, requireRole('enterprise', 'restauratrice'), (req, res) => {
-  const msgs = read('messages').sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+app.get('/api/messages/conversations', auth, requireRole('enterprise', 'restauratrice'), async (req, res) => {
+  const msgs = (await read('messages')).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   const seen = new Map();
-  msgs.forEach(m => {
+  for (const m of msgs) {
     if (m.senderId === req.user.id || m.recipientId === req.user.id) {
       const otherId   = m.senderId === req.user.id ? m.recipientId : m.senderId;
       const otherRole = m.senderId === req.user.id ? m.recipientRole : m.senderRole;
@@ -1465,36 +1637,36 @@ app.get('/api/messages/conversations', auth, requireRole('enterprise', 'restaura
         seen.set(otherId, {
           id: otherId,
           role: otherRole,
-          name: resolveDisplayName(otherId, otherRole),
+          name: await resolveDisplayName(otherId, otherRole),
           lastMessage: m.type === 'text' ? m.content : '🎵 Message audio',
           lastTimestamp: m.timestamp,
           unread,
         });
       }
     }
-  });
+  }
   res.json([...seen.values()].sort((a, b) => new Date(b.lastTimestamp) - new Date(a.lastTimestamp)));
 });
 
 // Historique d'une conversation
-app.get('/api/messages', auth, requireRole('enterprise', 'restauratrice'), (req, res) => {
+app.get('/api/messages', auth, requireRole('enterprise', 'restauratrice'), async (req, res) => {
   const { withId } = req.query;
   if (!withId) return res.status(400).json({ error: 'Paramètre withId requis' });
 
-  const msgs = read('messages')
+  const msgs = (await read('messages'))
     .filter(m =>
       (m.senderId === req.user.id && m.recipientId === withId) ||
       (m.senderId === withId && m.recipientId === req.user.id)
     )
-    .map(({ audioData, ...m }) => m) // audioData chargé à la demande
+    .map(({ audioData, ...m }) => m)
     .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
   res.json(msgs);
 });
 
 // Charger l'audio d'un message (lazy)
-app.get('/api/messages/:id/audio', auth, requireRole('enterprise', 'restauratrice'), (req, res) => {
-  const msg = read('messages').find(m => m.id === req.params.id);
+app.get('/api/messages/:id/audio', auth, requireRole('enterprise', 'restauratrice'), async (req, res) => {
+  const msg = (await read('messages')).find(m => m.id === req.params.id);
   if (!msg) return res.status(404).json({ error: 'Message introuvable' });
   if (msg.type !== 'audio') return res.status(400).json({ error: 'Pas un message audio' });
   if (msg.senderId !== req.user.id && msg.recipientId !== req.user.id)
@@ -1503,18 +1675,16 @@ app.get('/api/messages/:id/audio', auth, requireRole('enterprise', 'restauratric
 });
 
 // Envoyer un message (texte ou audio)
-app.post('/api/messages', auth, requireRole('enterprise', 'restauratrice'), (req, res) => {
+app.post('/api/messages', auth, requireRole('enterprise', 'restauratrice'), async (req, res) => {
   const { recipientId, type, content, audioData, audioDuration } = req.body;
   if (!recipientId) return res.status(400).json({ error: 'Destinataire requis' });
   if (!['text', 'audio'].includes(type)) return res.status(400).json({ error: 'Type invalide (text|audio)' });
   if (type === 'text' && !content?.trim()) return res.status(400).json({ error: 'Contenu requis' });
   if (type === 'audio' && !audioData) return res.status(400).json({ error: 'Données audio requises' });
 
-  // Vérifier affiliation
-  if (!canMessage(req, recipientId))
+  if (!(await canMessage(req, recipientId)))
     return res.status(403).json({ error: 'Vous n\'êtes pas affilié à cet interlocuteur' });
 
-  // Taille audio max
   if (type === 'audio') {
     const base64Data = audioData.includes(',') ? audioData.split(',')[1] : audioData;
     const bytes = Buffer.byteLength(base64Data, 'base64');
@@ -1522,15 +1692,14 @@ app.post('/api/messages', auth, requireRole('enterprise', 'restauratrice'), (req
       return res.status(413).json({ error: `Audio trop lourd (max ${MAX_AUDIO_MB} Mo)` });
   }
 
-  // Déterminer le rôle destinataire
   let recipientRole, recipientName;
-  const ent = read('enterprises').find(e => e.id === recipientId);
-  const rst = read('restaurants').find(r => r.id === recipientId);
+  const ent = (await read('enterprises')).find(e => e.id === recipientId);
+  const rst = (await read('restaurants')).find(r => r.id === recipientId);
   if (ent)      { recipientRole = 'enterprise';   recipientName = ent.companyName; }
   else if (rst) { recipientRole = 'restauratrice'; recipientName = rst.restaurantName; }
   else return res.status(404).json({ error: 'Destinataire introuvable' });
 
-  const senderName = resolveDisplayName(req.user.id, req.user.role);
+  const senderName = await resolveDisplayName(req.user.id, req.user.role);
 
   const msg = {
     id: uid(),
@@ -1548,14 +1717,13 @@ app.post('/api/messages', auth, requireRole('enterprise', 'restauratrice'), (req
     timestamp:     new Date().toISOString(),
   };
 
-  const messages = read('messages');
+  const messages = await read('messages');
   messages.push(msg);
-  write('messages', messages);
+  await write('messages', messages);
 
-  // Notif SSE temps réel + notification persistante
   const { audioData: _, ...msgSafe } = msg;
   sseNotify(recipientId, 'new_message', msgSafe);
-  pushNotif(recipientId, recipientRole, 'new_message', `Nouveau message de ${senderName}`,
+  await pushNotif(recipientId, recipientRole, 'new_message', `Nouveau message de ${senderName}`,
     type === 'text' ? content.trim() : '🎵 Vous avez reçu un message audio.',
     { messageId: msg.id, senderId: req.user.id });
 
@@ -1563,40 +1731,155 @@ app.post('/api/messages', auth, requireRole('enterprise', 'restauratrice'), (req
 });
 
 // Marquer des messages comme lus
-app.post('/api/messages/read', auth, requireRole('enterprise', 'restauratrice'), (req, res) => {
+app.post('/api/messages/read', auth, requireRole('enterprise', 'restauratrice'), async (req, res) => {
   const { withId } = req.body;
   if (!withId) return res.status(400).json({ error: 'withId requis' });
-  const messages = read('messages').map(m => {
+  const messages = (await read('messages')).map(m => {
     if (m.senderId === withId && m.recipientId === req.user.id && !m.readBy.includes(req.user.id)) {
       return { ...m, readBy: [...m.readBy, req.user.id] };
     }
     return m;
   });
-  write('messages', messages);
+  await write('messages', messages);
   res.json({ success: true });
 });
 
 // Nombre de messages non lus
-app.get('/api/messages/unread', auth, requireRole('enterprise', 'restauratrice'), (req, res) => {
-  const count = read('messages').filter(m =>
+app.get('/api/messages/unread', auth, requireRole('enterprise', 'restauratrice'), async (req, res) => {
+  const count = (await read('messages')).filter(m =>
     m.recipientId === req.user.id && !m.readBy.includes(req.user.id)
   ).length;
   res.json({ count });
 });
 
 // Supprimer un message (expéditeur seulement)
-app.delete('/api/messages/:id', auth, requireRole('enterprise', 'restauratrice'), (req, res) => {
-  const messages = read('messages');
+app.delete('/api/messages/:id', auth, requireRole('enterprise', 'restauratrice'), async (req, res) => {
+  const messages = await read('messages');
   const msg = messages.find(m => m.id === req.params.id);
   if (!msg) return res.status(404).json({ error: 'Message introuvable' });
   if (msg.senderId !== req.user.id) return res.status(403).json({ error: 'Seul l\'expéditeur peut supprimer' });
-  write('messages', messages.filter(m => m.id !== req.params.id));
+  await write('messages', messages.filter(m => m.id !== req.params.id));
   res.json({ success: true });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TÉLÉCHARGEMENT PDF
 // ─────────────────────────────────────────────────────────────────────────────
+
+function buildInvoicePDF(invoice, restaurant, enterprise, invNum, dateStr) {
+  return new Promise((resolve, reject) => {
+    const doc    = new PDFDocument({ margin: 40, size: 'A4' });
+    const chunks = [];
+    doc.on('data', c => chunks.push(c));
+    doc.on('end',  () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    const PW = doc.page.width;
+    const M  = 40;
+    const CW = PW - M * 2;
+
+    // ── Bandeau orange ──────────────────────────────────────────────────────
+    doc.rect(0, 0, PW, 70).fill('#F97316');
+    doc.fontSize(26).font('Helvetica-Bold').fillColor('#FFFFFF')
+      .text('LunchApp', M, 18, { width: CW/2, lineBreak: false });
+    doc.fontSize(11).font('Helvetica').fillColor('#FFF7ED')
+      .text('Gestion des repas d\'entreprise', M, 46, { width: CW/2, lineBreak: false });
+    doc.fontSize(20).font('Helvetica-Bold').fillColor('#FFFFFF')
+      .text('FACTURE', M + CW/2, 22, { width: CW/2, align: 'right', lineBreak: false });
+    doc.fontSize(10).font('Helvetica').fillColor('#FFF7ED')
+      .text(invNum, M + CW/2, 46, { width: CW/2, align: 'right', lineBreak: false });
+
+    // ── Infos restaurant / entreprise ───────────────────────────────────────
+    const infoY = 88;
+    doc.fontSize(9).font('Helvetica-Bold').fillColor('#F97316')
+      .text('DE :', M, infoY);
+    doc.fontSize(10).font('Helvetica-Bold').fillColor('#1E293B')
+      .text(restaurant.restaurantName || invoice.restaurantName, M, infoY + 14);
+    doc.fontSize(9).font('Helvetica').fillColor('#64748B')
+      .text(restaurant.address || '', M, infoY + 27)
+      .text(restaurant.phone   || '', M, infoY + 39);
+
+    doc.fontSize(9).font('Helvetica-Bold').fillColor('#F97316')
+      .text('FACTURÉ À :', M + CW/2, infoY);
+    doc.fontSize(10).font('Helvetica-Bold').fillColor('#1E293B')
+      .text(enterprise.companyName || invoice.enterpriseName, M + CW/2, infoY + 14);
+    doc.fontSize(9).font('Helvetica').fillColor('#64748B')
+      .text(enterprise.email    || '', M + CW/2, infoY + 27)
+      .text(enterprise.phone    || '', M + CW/2, infoY + 39);
+
+    // Date + référence commande
+    doc.fontSize(9).font('Helvetica').fillColor('#64748B')
+      .text(`Date : ${dateStr}   ·   Commande : ${invoice.orderId?.slice(0,8).toUpperCase() || '—'}`, M, infoY + 56);
+
+    // ── Séparateur ──────────────────────────────────────────────────────────
+    const sepY = infoY + 74;
+    doc.moveTo(M, sepY).lineTo(PW-M, sepY).strokeColor('#E2E8F0').lineWidth(1).stroke();
+
+    // ── Tableau des articles ─────────────────────────────────────────────────
+    const cols  = [30, 220, 80, 95, 90]; // N°, Article, Qté, Prix unit., Total
+    const heads = ['N°', 'Article', 'Qté', 'Prix unit.', 'Total FCFA'];
+    const RH    = 24;
+    let ty = sepY + 14;
+
+    // En-tête tableau
+    doc.rect(M, ty, CW, RH).fill('#1E293B');
+    let cx = M;
+    heads.forEach((h, i) => {
+      const align = i >= 2 ? 'right' : 'left';
+      doc.fontSize(9).font('Helvetica-Bold').fillColor('#FFFFFF')
+        .text(h, cx + 5, ty + 7, { width: cols[i] - 10, lineBreak: false, align });
+      cx += cols[i];
+    });
+    ty += RH;
+
+    // Lignes
+    (invoice.items || []).forEach((item, idx) => {
+      const bg = idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC';
+      doc.rect(M, ty, CW, RH).fillAndStroke(bg, '#E2E8F0');
+      cx = M;
+      const cells = [
+        String(idx + 1), item.name || '—',
+        String(item.qty || 1),
+        `${(item.unitPrice||0).toLocaleString('fr-FR')}`,
+        `${(item.total||0).toLocaleString('fr-FR')}`,
+      ];
+      cells.forEach((cell, i) => {
+        const align = i >= 2 ? 'right' : 'left';
+        doc.fontSize(9).font('Helvetica').fillColor('#334155')
+          .text(cell, cx + 5, ty + 7, { width: cols[i] - 10, lineBreak: false, align, ellipsis: true });
+        cx += cols[i];
+      });
+      ty += RH;
+    });
+
+    if (!(invoice.items || []).length) {
+      doc.rect(M, ty, CW, RH).fill('#FAFAFA');
+      doc.fontSize(9).font('Helvetica').fillColor('#94A3B8')
+        .text('Aucun article', M, ty + 7, { width: CW, align: 'center', lineBreak: false });
+      ty += RH;
+    }
+
+    // ── Ligne total ──────────────────────────────────────────────────────────
+    ty += 6;
+    doc.rect(M + CW - 185, ty, 185, 28).fill('#FFF7ED');
+    doc.fontSize(11).font('Helvetica-Bold').fillColor('#F97316')
+      .text(`TOTAL  ${(invoice.totalAmount||0).toLocaleString('fr-FR')} FCFA`,
+        M, ty + 7, { width: CW, align: 'right', lineBreak: false });
+    ty += 28;
+
+    // ── Pied de page ────────────────────────────────────────────────────────
+    ty += 20;
+    doc.rect(0, ty, PW, 1).fill('#E2E8F0');
+    ty += 10;
+    doc.fontSize(9).font('Helvetica').fillColor('#64748B')
+      .text('Paiement à la livraison', M, ty, { continued: true })
+      .text('LunchApp — Tous droits réservés', { align: 'right' });
+    doc.fontSize(8).fillColor('#94A3B8')
+      .text(`Généré le ${dateStr} · ${invNum}`, M, ty + 16, { align: 'center', width: CW });
+
+    doc.end();
+  });
+}
 
 function buildPDF(blocks) {
   return new Promise((resolve, reject) => {
@@ -1638,8 +1921,8 @@ app.get('/api/stats/pdf/restaurant', auth, requireRole('restauratrice'), async (
   const frequency = req.query.frequency || 'monthly';
   const start     = getStartDate(frequency);
   const user      = req.user;
-  const orders    = read('orders').filter(o => o.restaurantId === user.id && new Date(o.createdAt) >= start);
-  const choices   = read('choices').filter(c => c.restaurantId === user.id && new Date(c.date) >= start);
+  const orders    = (await read('orders')).filter(o => o.restaurantId === user.id && new Date(o.createdAt) >= start);
+  const choices   = (await read('choices')).filter(c => c.restaurantId === user.id && new Date(c.date) >= start);
   const totalRev  = orders.reduce((s, o) => s + (o.totalAmount || 0), 0);
   const ratings   = choices.filter(c => c.rating).map(c => c.rating);
   const avgRating = ratings.length ? (ratings.reduce((s, r) => s + r, 0) / ratings.length).toFixed(1) : 'N/A';
@@ -1682,9 +1965,9 @@ app.get('/api/stats/pdf/enterprise', auth, requireRole('enterprise'), async (req
   const frequency  = req.query.frequency || 'monthly';
   const start      = getStartDate(frequency);
   const user       = req.user;
-  const orders     = read('orders').filter(o => o.enterpriseId === user.id && new Date(o.createdAt) >= start);
-  const choices    = read('choices').filter(c => c.enterpriseId === user.id && new Date(c.date) >= start);
-  const employees  = read('employees').filter(e => e.enterpriseId === user.id);
+  const orders     = (await read('orders')).filter(o => o.enterpriseId === user.id && new Date(o.createdAt) >= start);
+  const choices    = (await read('choices')).filter(c => c.enterpriseId === user.id && new Date(c.date) >= start);
+  const employees  = (await read('employees')).filter(e => e.enterpriseId === user.id);
   const totalSpent = orders.reduce((s, o) => s + (o.totalAmount || 0), 0);
 
   const byResto = {};
@@ -1725,11 +2008,11 @@ app.get('/api/stats/pdf/enterprise', auth, requireRole('enterprise'), async (req
 app.get('/api/stats/pdf/admin', auth, requireRole('superadmin'), async (req, res) => {
   const frequency   = req.query.frequency || 'monthly';
   const start       = getStartDate(frequency);
-  const enterprises = read('enterprises');
-  const restaurants = read('restaurants');
-  const employees   = read('employees');
-  const orders      = read('orders').filter(o => new Date(o.createdAt) >= start);
-  const choices     = read('choices').filter(c => new Date(c.date) >= start);
+  const enterprises = await read('enterprises');
+  const restaurants = await read('restaurants');
+  const employees   = await read('employees');
+  const orders      = (await read('orders')).filter(o => new Date(o.createdAt) >= start);
+  const choices     = (await read('choices')).filter(c => new Date(c.date) >= start);
   const totalMob    = orders.reduce((s, o) => s + (o.totalAmount || 0), 0);
 
   const byResto = {};
@@ -1869,7 +2152,7 @@ function buildOrderListPDF({ dateStr, summary, employees }) {
 app.get('/api/stats/pdf/orders', auth, requireRole('enterprise'), async (req, res) => {
   const user    = req.user;
   const today   = new Date().toISOString().split('T')[0];
-  const choices = read('choices').filter(c => c.enterpriseId === user.id && c.date === today);
+  const choices = (await read('choices')).filter(c => c.enterpriseId === user.id && c.date === today);
 
   const now     = new Date();
   const raw     = now.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -1899,9 +2182,20 @@ app.get('/api/stats/pdf/orders', auth, requireRole('enterprise'), async (req, re
   }
 });
 
+// ── Stats publiques (sans auth) ───────────────────────────────────────────────
+app.get('/api/stats/public', async (req, res) => {
+  const enterprises = (await read('enterprises')).length;
+  const restaurants = (await read('restaurants')).length;
+  res.json({ enterprises, restaurants });
+});
+
+// ── Gestionnaire d'erreurs global (évite les crashs serveur) ─────────────────
+process.on('uncaughtException',  err => { /* ignore — keeps server running */ });
+process.on('unhandledRejection', ()  => { /* ignore — keeps server running */ });
+
 // ── Démarrage du serveur ──────────────────────────────────────────────────────
 if (require.main === module) {
-  app.listen(PORT, 'localhost', () => {
+  app.listen(PORT, () => {
     console.log(`🚀 LunchApp v2 démarré → http://localhost:${PORT}`);
   });
 }
