@@ -3,3 +3,10 @@ node_modules/
 data/*.json
 tests/test-data/
 *.log
+
+# WhatsApp Web JS — session auth (données sensibles)
+.wwebjs_auth/
+.wwebjs_cache/
+
+# QR code généré temporairement
+public/wa-qr.html

@@ -1,22 +1,44 @@
 [
   {
-    "id": "mn959gvhtix6n2",
+    "id": "mninvttcugqdr4",
+    "employeeId": "MahamadiTassembedo",
+    "firstName": "Mahamadi",
+    "lastName": "TASSEMBEDO",
     "fullName": "Mahamadi TASSEMBEDO",
     "gender": "male",
-    "password": "$2a$10$3un8CIByN65P025hf/trJOPGlpmUUtvI/MKqfPhGE2v1c6JX7J/Bq",
+    "whatsapp": "+22654458712",
+    "password": "$2a$10$Qj..23wEc.8vr6qTGOlqR.wlTDd6CcfV/WW6kM34Ehr/khsJqS5yK",
     "role": "employee",
     "enterpriseId": "mn94fh57vnrd6w",
     "enterpriseName": "El Immeka International",
-    "createdAt": "2026-03-27T16:57:19.277Z"
+    "createdAt": "2026-04-03T08:48:31.152Z"
   },
   {
-    "id": "mn95ae70un4rre",
+    "id": "mnio6fwa1uwhfm",
+    "employeeId": "DalissaDala",
+    "firstName": "Dalissa",
+    "lastName": "DALA",
     "fullName": "Dalissa DALA",
     "gender": "female",
-    "password": "$2a$10$ccQGZmvrAaoijP4p826ghuuDo.20bJaVfBR.37zbcDa3kzTOsW2nK",
+    "whatsapp": "+22672618410",
+    "password": "$2a$10$WF33rlVtKlCJGPsGj7F7i.Sd7Qs1zug8xRoTewL1eg36oybih2RtC",
     "role": "employee",
     "enterpriseId": "mn94fh57vnrd6w",
     "enterpriseName": "El Immeka International",
-    "createdAt": "2026-03-27T16:58:02.460Z"
+    "createdAt": "2026-04-03T08:56:46.330Z"
+  },
+  {
+    "id": "mnioaj4537crey",
+    "employeeId": "RachidFofana",
+    "firstName": "Rachid",
+    "lastName": "FOFANA",
+    "fullName": "Rachid FOFANA",
+    "gender": "male",
+    "whatsapp": "+22670805042",
+    "password": "$2a$10$Wlw6NYKyQNuGZ1aHxVgR8eiiZHC1v.Mm7big3ftYqBOfQzt.uXNQC",
+    "role": "employee",
+    "enterpriseId": "mn94fh57vnrd6w",
+    "enterpriseName": "El Immeka International",
+    "createdAt": "2026-04-03T08:59:57.125Z"
   }
 ]

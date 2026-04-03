@@ -4,6 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>LunchApp</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg"/>
 <link rel="stylesheet" href="style.css"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
@@ -122,11 +123,12 @@
 
     <!-- Connexion -->
     <div id="pane-login">
-      <div class="field-label">Email ou nom complet</div>
-      <input id="l-id" type="text" placeholder="Email ou nom complet"/>
+      <div class="field-label">Email <span class="field-label-sep">/</span> Identifiant employé</div>
+      <div class="field-hint">Entreprises et restaurants : votre adresse email · Employés : votre identifiant</div>
+      <input id="l-id" type="text" placeholder="Email ou identifiant employé"/>
       <div class="field-label">Mot de passe</div>
       <div class="pwd-row">
-        <input id="l-pwd" type="password" placeholder="Mot de passe"/>
+        <input id="l-pwd" type="password" placeholder="Mot de passe" autocomplete="current-password"/>
         <button type="button" class="eye-btn" onclick="toggleEye('l-pwd',this)">👁</button>
       </div>
       <button class="btn primary full mt" onclick="doLogin()">Se connecter</button>
@@ -148,7 +150,7 @@
       <input id="reset-token" type="hidden"/>
       <div class="field-label">Nouveau mot de passe</div>
       <div class="pwd-row">
-        <input id="reset-pwd" type="password" placeholder="Nouveau mot de passe" oninput="pwdMeter(this,'m-reset')"/>
+        <input id="reset-pwd" type="password" placeholder="Nouveau mot de passe" autocomplete="new-password" oninput="pwdMeter(this,'m-reset')"/>
         <button type="button" class="eye-btn" onclick="toggleEye('reset-pwd',this)">👁</button>
       </div>
       <div id="m-reset" class="pwd-meter"></div>
@@ -169,7 +171,7 @@
         <input id="r-phone" type="tel" placeholder="Téléphone"/>
         <input id="r-location" type="text" placeholder="Lien Google Maps (https://...)"/>
         <div class="pwd-row">
-          <input id="r-pwd" type="password" placeholder="Mot de passe *" oninput="pwdMeter(this,'m-ent')"/>
+          <input id="r-pwd" type="password" placeholder="Mot de passe *" autocomplete="new-password" oninput="pwdMeter(this,'m-ent')"/>
           <button type="button" class="eye-btn" onclick="toggleEye('r-pwd',this)">👁</button>
         </div>
         <div id="m-ent" class="pwd-meter"></div>
@@ -182,20 +184,20 @@
         <input id="r-owner" type="text" placeholder="Votre nom complet *"/>
         <input id="r-remail" type="email" placeholder="Email *"/>
         <input id="r-rphone" type="tel" placeholder="Téléphone"/>
-        <input id="r-addr" type="text" placeholder="Adresse"/>
+        <input id="r-addr" type="text" placeholder="Adresse (ex: Ouagadougou, Secteur 51)"/>
         <div class="field-label">Spécialités (plusieurs possibles)</div>
         <div id="r-spec-container" class="specialty-grid"></div>
         <script>document.addEventListener('DOMContentLoaded',()=>renderSpecialtyCheckboxes('r-spec-container',[]));</script>
         <div class="field-label">Paiements mobile</div>
         <div id="pay-entries">
           <div class="pay-entry">
-            <select class="pay-type"><option value="">Type</option><option value="OM">Orange Money</option><option value="Wave">Wave</option><option value="Moov">Moov Money</option><option value="Telecash">Telecash</option></select>
+            <select class="pay-type"><option value="">Type de paiement</option><option value="OM">Orange Money</option><option value="Wave">Wave</option><option value="Moov">Moov Money</option><option value="Telecash">Telecash</option></select>
             <input type="text" class="pay-num" placeholder="Numéro / code agent"/>
           </div>
         </div>
-        <button class="btn ghost sm" onclick="addPayEntry('pay-entries')">+ Paiement</button>
+        <button class="btn ghost sm" onclick="addPayEntry('pay-entries')">+ Ajouter un type de paiement</button>
         <div class="pwd-row mt">
-          <input id="r-rpwd" type="password" placeholder="Mot de passe *" oninput="pwdMeter(this,'m-rst')"/>
+          <input id="r-rpwd" type="password" placeholder="Mot de passe *" autocomplete="new-password" oninput="pwdMeter(this,'m-rst')"/>
           <button type="button" class="eye-btn" onclick="toggleEye('r-rpwd',this)">👁</button>
         </div>
         <div id="m-rst" class="pwd-meter"></div>
@@ -249,35 +251,56 @@
           <h2>📝 Mes plats & boissons</h2>
         </div>
         <div id="full-menu-list"></div>
-        <hr class="divider"/>
-        <div class="pane-header">
-          <h2>☀️ Menu du jour</h2>
-          <div class="date-ctrl">
-            <button class="btn ghost sm" onclick="shiftDay(-1)">◀</button>
-            <span id="day-label" class="day-lbl"></span>
-            <button class="btn ghost sm" onclick="shiftDay(1)">▶</button>
-          </div>
-        </div>
-        <p class="hint">Cochez les articles disponibles aujourd'hui</p>
-        <div id="daily-menu-list"></div>
       </div>
 
       <div id="pane-clientele" class="pane hidden">
         <div class="pane-header">
-          <h2>📦 Commandes</h2>
-          <button class="btn ghost sm" onclick="loadClientele()">↻ Rafraîchir</button>
+          <div>
+            <h2>📦 Commandes</h2>
+            <span id="cmd-today-date" class="cmd-header-date"></span>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn ghost sm" onclick="downloadOrdersPDF ? downloadOrdersPDF() : null" title="Exporter PDF">⬇️ PDF</button>
+            <button class="btn ghost sm" onclick="loadClientele()" title="Rafraîchir">↻</button>
+          </div>
         </div>
 
-        <h3 class="section-title">🏢 Commandes par entreprise</h3>
-        <div id="clientele-list"></div>
+        <!-- Onglets internes -->
+        <div class="dash-tab-bar">
+          <button class="dtab active" id="ctab-today"  onclick="switchClienteleTab('today')">☀️ Du jour</button>
+          <button class="dtab"        id="ctab-search" onclick="switchClienteleTab('search')">🔍 Rechercher</button>
+          <button class="dtab"        id="ctab-subs"   onclick="switchClienteleTab('subs')">🔔 Abonnements</button>
+        </div>
 
-        <hr class="divider"/>
-        <h3 class="section-title">🔔 Demandes d'abonnement</h3>
-        <div id="rst-subs-list"></div>
+        <!-- Panneau Commandes du jour -->
+        <div id="ctab-panel-today">
+          <div id="clientele-today-table"></div>
+        </div>
 
-        <hr class="divider"/>
-        <h3 class="section-title">📤 Proposer mes services</h3>
-        <div id="rst-enterprises-list"></div>
+        <!-- Panneau Rechercher commandes -->
+        <div id="ctab-panel-search" class="hidden">
+          <div class="arch-filter-card">
+            <div class="arch-filter-row">
+              <div class="arch-filter-field">
+                <label class="arch-filter-label">Du</label>
+                <input type="date" id="arch-date-from" class="arch-date-input" onchange="filterArchives()"/>
+              </div>
+              <div class="arch-filter-sep">→</div>
+              <div class="arch-filter-field">
+                <label class="arch-filter-label">Au</label>
+                <input type="date" id="arch-date-to" class="arch-date-input" onchange="filterArchives()"/>
+              </div>
+              <button class="btn ghost sm arch-filter-clear" onclick="clearArchiveFilter()">✕ Effacer</button>
+            </div>
+            <div id="arch-filter-summary" class="arch-filter-summary hidden"></div>
+          </div>
+          <div id="clientele-archives"></div>
+        </div>
+
+        <!-- Panneau Abonnements -->
+        <div id="ctab-panel-subs" class="hidden">
+          <div id="rst-subs-list"></div>
+        </div>
       </div>
 
       <div id="pane-rst-messages" class="pane hidden">
@@ -318,19 +341,12 @@
           <h2>🍴 Restaurants</h2>
           <div class="segmented">
             <button id="seg-all" class="seg-btn active" onclick="switchRestoTab('all')">Tous</button>
-            <button id="seg-aff" class="seg-btn" onclick="switchRestoTab('affiliated')">Mes affiliés</button>
+            <button id="seg-aff" class="seg-btn" onclick="switchRestoTab('affiliated')">⭐ Affiliés</button>
           </div>
         </div>
         <div id="ent-restaurants-list"></div>
       </div>
 
-      <div id="pane-ent-menus" class="pane hidden">
-        <div class="pane-header">
-          <h2>🗒️ Menus des restaurants affiliés</h2>
-          <button class="btn ghost sm" onclick="loadEntMenus()">↻</button>
-        </div>
-        <div id="ent-menus-content"></div>
-      </div>
 
       <div id="pane-ent-employees" class="pane hidden">
         <!-- Barre d'onglets interne -->
@@ -354,7 +370,21 @@
         <div id="dtab-panel-orders" class="hidden">
           <div class="pane-header">
             <h2>📦 Commandes</h2>
-            <button class="btn ghost sm" onclick="loadEntOrders()">↻ Rafraîchir</button>
+            <button class="btn ghost sm" onclick="loadEntOrders()">↻</button>
+          </div>
+          <div class="arch-filter-card" style="margin-bottom:14px">
+            <div class="arch-filter-row">
+              <div class="arch-filter-field">
+                <label class="arch-filter-label">Du</label>
+                <input type="date" id="ent-ord-from" class="arch-date-input" onchange="renderEntOrdersFiltered()"/>
+              </div>
+              <div class="arch-filter-sep">→</div>
+              <div class="arch-filter-field">
+                <label class="arch-filter-label">Au</label>
+                <input type="date" id="ent-ord-to" class="arch-date-input" onchange="renderEntOrdersFiltered()"/>
+              </div>
+              <button class="btn ghost sm arch-filter-clear" onclick="clearEntOrderFilter()">✕ Effacer</button>
+            </div>
           </div>
           <div id="ent-orders-list"></div>
         </div>
@@ -363,7 +393,22 @@
         <div id="dtab-panel-invoices" class="hidden">
           <div class="pane-header">
             <h2>🧾 Factures reçues</h2>
-            <button class="btn ghost sm" onclick="loadEntInvoices()">↻ Rafraîchir</button>
+            <button class="btn ghost sm" onclick="loadEntInvoices()">↻</button>
+          </div>
+          <div class="arch-filter-card" style="margin-bottom:14px">
+            <input type="text" id="ent-inv-search" class="arch-search-input" placeholder="🔍  Rechercher par numéro ou restaurant…" oninput="renderEntInvoicesFiltered()"/>
+            <div class="arch-filter-row" style="margin-top:10px">
+              <div class="arch-filter-field">
+                <label class="arch-filter-label">Du</label>
+                <input type="date" id="ent-inv-from" class="arch-date-input" onchange="renderEntInvoicesFiltered()"/>
+              </div>
+              <div class="arch-filter-sep">→</div>
+              <div class="arch-filter-field">
+                <label class="arch-filter-label">Au</label>
+                <input type="date" id="ent-inv-to" class="arch-date-input" onchange="renderEntInvoicesFiltered()"/>
+              </div>
+              <button class="btn ghost sm arch-filter-clear" onclick="clearEntInvFilter()">✕ Effacer</button>
+            </div>
           </div>
           <div id="ent-invoices-list"></div>
         </div>
@@ -372,12 +417,17 @@
         <div id="dtab-panel-stats" class="hidden">
           <div class="pane-header">
             <h2>📊 Statistiques</h2>
-            <select id="ent-freq" onchange="loadEntStats()">
-              <option value="daily">Aujourd'hui</option><option value="weekly">7 jours</option>
-              <option value="monthly" selected>Ce mois</option><option value="quarterly">Trimestre</option>
-              <option value="semi-annual">Semestre</option><option value="annual">Année</option>
-            </select>
-            <button class="btn ghost sm" onclick="pdfEntStats()">⬇ PDF</button>
+            <div style="display:flex;gap:8px;align-items:center">
+              <select id="ent-freq" class="input-sm" onchange="loadEntStats()">
+                <option value="daily">Aujourd'hui</option>
+                <option value="weekly">7 jours</option>
+                <option value="monthly" selected>Ce mois</option>
+                <option value="quarterly">Trimestre</option>
+                <option value="semi-annual">Semestre</option>
+                <option value="annual">Année</option>
+              </select>
+              <button class="btn ghost sm" onclick="pdfEntStats()">⬇ PDF</button>
+            </div>
           </div>
           <div id="ent-stats-content"></div>
         </div>
@@ -418,15 +468,29 @@
         <div id="emp-history-list"></div>
       </div>
 
+      <div id="pane-emp-profile" class="pane hidden">
+        <div class="pane-header"><h2>👤 Mon profil</h2></div>
+        <div id="emp-profile-content"></div>
+      </div>
+
       <!-- ── ADMIN ── -->
       <div id="pane-admin" class="pane hidden">
-        <div class="pane-header" style="margin-bottom:16px">
-          <h2>⚙️ Administration</h2>
-          <div class="freq-row" id="admin-freq-row">
-            <select id="adm-freq" onchange="loadAdminStats()">
-              <option value="daily">Aujourd'hui</option><option value="weekly">7 jours</option>
-              <option value="monthly" selected>Ce mois</option><option value="quarterly">Trimestre</option>
-              <option value="semi-annual">Semestre</option><option value="annual">Année</option>
+        <div class="adm-header">
+          <div class="adm-header-left">
+            <div class="adm-header-icon">⚙️</div>
+            <div>
+              <h2 class="adm-header-title">Administration</h2>
+              <p class="adm-header-sub">Tableau de bord LunchApp</p>
+            </div>
+          </div>
+          <div class="adm-header-actions">
+            <select id="adm-freq" onchange="loadAdminStats()" class="adm-select">
+              <option value="daily">Aujourd'hui</option>
+              <option value="weekly">7 jours</option>
+              <option value="monthly" selected>Ce mois</option>
+              <option value="quarterly">Trimestre</option>
+              <option value="semi-annual">Semestre</option>
+              <option value="annual">Année</option>
             </select>
             <button class="btn ghost sm" onclick="pdfAdminStats()">⬇ PDF</button>
           </div>
@@ -491,22 +555,37 @@
   <div class="dialog">
     <h3 id="modal-emp-title">Nouvel employé</h3>
     <input id="emp-id" type="hidden"/>
-    <div class="field-label">Nom complet *</div>
-    <input id="emp-name" type="text" placeholder="Prénom Nom"/>
-    <div class="field-label">Genre *</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div>
+        <div class="field-label">Prénom *</div>
+        <input id="emp-firstname" type="text" placeholder="Prénom" oninput="autoFillEmpId()"/>
+      </div>
+      <div>
+        <div class="field-label">Nom *</div>
+        <input id="emp-lastname" type="text" placeholder="Nom de famille" oninput="autoFillEmpId()"/>
+      </div>
+    </div>
+    <div class="field-label">ID employé *</div>
+    <div class="emp-id-row">
+      <input id="emp-employee-id" type="text" placeholder="Ex: JeanDupont" maxlength="30" oninput="this.dataset.manual='1'"/>
+      <span id="emp-id-hint" class="emp-id-hint hidden">✨ Auto-suggéré</span>
+    </div>
+    <div class="field-label">Numéro WhatsApp</div>
+    <input id="emp-whatsapp" type="tel" placeholder="Ex: 22664046120"/>
+    <div class="field-label">Sexe *</div>
     <select id="emp-gender">
       <option value="">-- Choisir --</option>
       <option value="male">👨 Homme</option>
       <option value="female">👩 Femme</option>
     </select>
-    <div class="field-label" id="emp-pwd-lbl">Mot de passe *</div>
+    <div class="field-label" id="emp-pwd-lbl">Mot de passe <span style="font-size:11px;color:var(--gray)">(min 6 car. — défaut: Temp1234)</span></div>
     <div class="pwd-row">
-      <input id="emp-pwd" type="password" placeholder="Mot de passe"/>
+      <input id="emp-pwd" type="password" placeholder="Laisser vide = Temp1234" autocomplete="new-password"/>
       <button type="button" class="eye-btn" onclick="toggleEye('emp-pwd',this)">👁</button>
     </div>
     <div class="dialog-btns">
       <button class="btn ghost" onclick="closeModal('modal-emp')">Annuler</button>
-      <button class="btn primary" onclick="saveEmployee()">Enregistrer</button>
+      <button class="btn primary" onclick="saveEmployee()">Créer le compte</button>
     </div>
   </div>
 </div>
@@ -526,29 +605,80 @@
 
 <!-- Modal profil restaurant -->
 <div id="modal-profile" class="overlay hidden">
-  <div class="dialog wide">
-    <h3>Mon profil</h3>
-    <div class="photo-row">
-      <img id="prof-img" src="" class="prof-thumb hidden"/>
-      <label class="btn ghost sm">📷 Photo <input type="file" id="prof-file" accept="image/*" style="display:none" onchange="onPhotoFile(event)"/></label>
-      <button class="btn ghost sm hidden" id="prof-clear-btn" onclick="clearProfilePhoto()">✕</button>
+  <div class="dialog wide prof-dialog">
+
+    <!-- En-tête -->
+    <div class="prof-dialog-head">
+      <h3>Mon profil</h3>
+      <button class="btn-icon-close" onclick="closeModal('modal-profile')">✕</button>
     </div>
-    <input id="prof-rname" type="text" placeholder="Nom du restaurant"/>
-    <input id="prof-fname" type="text" placeholder="Votre nom complet"/>
-    <input id="prof-phone" type="tel" placeholder="Téléphone"/>
-    <input id="prof-addr" type="text" placeholder="Adresse"/>
-    <div class="field-label">Spécialités</div>
+
+    <!-- Photo -->
+    <div class="prof-photo-section">
+      <div class="prof-photo-wrap">
+        <img id="prof-img" src="" class="prof-circle hidden"/>
+        <div id="prof-initials" class="prof-circle-ph">🍴</div>
+        <label class="prof-photo-overlay" title="Changer la photo">
+          📷
+          <input type="file" id="prof-file" accept="image/*" style="display:none" onchange="onPhotoFile(event)"/>
+        </label>
+      </div>
+      <button class="btn ghost sm hidden" id="prof-clear-btn" onclick="clearProfilePhoto()">✕ Retirer</button>
+    </div>
+
+    <!-- Infos générales -->
+    <div class="prof-section-label">Informations générales</div>
+    <div class="prof-field-grid">
+      <div class="prof-field">
+        <label class="field-label">Nom du restaurant</label>
+        <input id="prof-rname" type="text" placeholder="Ex : Chez Mamounata"/>
+      </div>
+      <div class="prof-field">
+        <label class="field-label">Votre nom complet</label>
+        <input id="prof-fname" type="text" placeholder="Prénom et nom"/>
+      </div>
+      <div class="prof-field">
+        <label class="field-label">Téléphone</label>
+        <input id="prof-phone" type="tel" placeholder="+226 XX XX XX XX"/>
+      </div>
+      <div class="prof-field">
+        <label class="field-label">Adresse / Localisation</label>
+        <input id="prof-addr" type="text" placeholder="Lien Google Maps ou adresse"/>
+      </div>
+    </div>
+    <div class="prof-field" style="margin-top:6px">
+      <label class="field-label">Description</label>
+      <textarea id="prof-desc" rows="2" placeholder="Décrivez votre restaurant…"></textarea>
+    </div>
+
+    <!-- Spécialités -->
+    <div class="prof-section-label" style="margin-top:18px">Spécialités culinaires</div>
     <div id="prof-spec-container" class="specialty-grid"></div>
-    <textarea id="prof-desc" rows="2" placeholder="Description…"></textarea>
-    <div class="field-label">Modes de paiement</div>
+
+    <!-- Paiements -->
+    <div class="prof-section-label" style="margin-top:18px">Modes de paiement</div>
     <div id="prof-pay-entries"></div>
-    <button class="btn ghost sm" onclick="addPayEntry('prof-pay-entries')">+ Paiement</button>
-    <div class="field-label" style="margin-top:12px">Changer mot de passe (optionnel)</div>
-    <input id="prof-oldpwd" type="password" placeholder="Ancien mot de passe"/>
-    <input id="prof-newpwd" type="password" placeholder="Nouveau mot de passe"/>
-    <div class="dialog-btns">
+    <button class="btn ghost sm" style="margin-top:8px" onclick="addPayEntry('prof-pay-entries')">+ Ajouter un mode</button>
+
+    <!-- Mot de passe -->
+    <div class="prof-pwd-section">
+      <div class="prof-section-label">Changer le mot de passe <span style="font-size:11px;font-weight:400;color:var(--gray)">(optionnel)</span></div>
+      <div class="prof-field-grid">
+        <div class="prof-field">
+          <label class="field-label">Ancien mot de passe</label>
+          <input id="prof-oldpwd" type="password" placeholder="••••••••" autocomplete="current-password"/>
+        </div>
+        <div class="prof-field">
+          <label class="field-label">Nouveau mot de passe</label>
+          <input id="prof-newpwd" type="password" placeholder="••••••••" autocomplete="new-password"/>
+        </div>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="dialog-btns" style="margin-top:20px">
       <button class="btn ghost" onclick="closeModal('modal-profile')">Annuler</button>
-      <button class="btn primary" onclick="saveProfile()">Enregistrer</button>
+      <button class="btn primary" onclick="saveProfile()">💾 Enregistrer</button>
     </div>
   </div>
 </div>
@@ -600,11 +730,38 @@
     <div class="field-label">Mauvaise expérience ?</div>
     <textarea id="da-bad" rows="2" placeholder="Décrivez si applicable…"></textarea>
     <div class="field-label">Mot de passe de confirmation *</div>
-    <input id="da-pwd" type="password" placeholder="Votre mot de passe"/>
+    <input id="da-pwd" type="password" placeholder="Votre mot de passe" autocomplete="current-password"/>
     <label class="check-row"><input type="checkbox" id="da-check"/> Je confirme vouloir supprimer mon compte</label>
     <div class="dialog-btns">
       <button class="btn ghost" onclick="closeModal('modal-delete-acct')">Annuler</button>
       <button class="btn danger" onclick="doDeleteAccount()">Supprimer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal identifiants créés -->
+<div id="modal-credentials" class="overlay hidden">
+  <div class="dialog">
+    <h3>✅ Compte créé</h3>
+    <p style="color:#555;font-size:14px;margin-bottom:16px">Voici les identifiants de connexion. Notez-les ou transmettez-les à l'employé.</p>
+    <div class="cred-box">
+      <div class="cred-row">
+        <span class="cred-label">Nom</span>
+        <span id="cred-name" class="cred-value"></span>
+      </div>
+      <div class="cred-row">
+        <span class="cred-label">Identifiant</span>
+        <span id="cred-id" class="cred-value mono"></span>
+      </div>
+      <div class="cred-row">
+        <span class="cred-label">Mot de passe</span>
+        <span id="cred-pwd" class="cred-value mono"></span>
+      </div>
+    </div>
+    <p id="cred-wa-status" style="font-size:13px;margin-top:10px;color:#888"></p>
+    <div class="dialog-btns" style="margin-top:16px">
+      <button class="btn ghost" onclick="copyCredentials()">📋 Copier</button>
+      <button class="btn primary" onclick="closeModal('modal-credentials')">Fermer</button>
     </div>
   </div>
 </div>

@@ -12,6 +12,76 @@ const cors       = require('cors');
 const path       = require('path');
 const nodemailer = require('nodemailer');
 const PDFDocument = require('pdfkit');
+const fs = require('fs');
+const { fork } = require('child_process');
+
+// ── WhatsApp — processus enfant isolé ────────────────────────────────────────
+// Puppeteer/Chromium tourne dans wa-worker.js (processus séparé).
+// S'il crash, seul le worker meurt — le serveur Express continue sans interruption.
+
+let waWorker      = null;
+let waReady       = false;
+let _waRetryTimer = null;
+let _shuttingDown = false;
+const _waMsgQueue = []; // file d'attente des messages en attente de readiness
+
+function _flushWaQueue() {
+  while (_waMsgQueue.length && waReady && waWorker) {
+    const { to, text } = _waMsgQueue.shift();
+    try { waWorker.send({ type: 'send', to, text }); } catch (e) {
+      console.error('[WhatsApp] Erreur IPC (flush) :', e.message);
+    }
+  }
+}
+
+function spawnWaWorker() {
+  if (_shuttingDown) return;
+  if (waWorker) { try { waWorker.kill(); } catch {} waWorker = null; }
+
+  waWorker = fork(path.join(__dirname, 'wa-worker.js'), [], {
+    env: { ...process.env },
+    silent: false,
+  });
+
+  waWorker.on('message', msg => {
+    if (msg.type === 'ready') {
+      waReady = true;
+      console.log('[WhatsApp] ✅ Worker prêt');
+      _flushWaQueue(); // envoyer les messages mis en attente
+    }
+    if (msg.type === 'disconnected') { waReady = false; }
+    if (msg.type === 'auth_failure') { waReady = false; }
+  });
+
+  waWorker.on('exit', (code, signal) => {
+    waReady = false;
+    waWorker = null;
+    if (_shuttingDown) return;
+    console.warn(`[WhatsApp] Worker terminé (code=${code} signal=${signal}) — relance dans 10 s`);
+    if (!_waRetryTimer) {
+      _waRetryTimer = setTimeout(() => { _waRetryTimer = null; spawnWaWorker(); }, 10000);
+    }
+  });
+
+  waWorker.on('error', err => {
+    console.error('[WhatsApp] Erreur worker :', err.message);
+  });
+}
+
+function initWhatsApp() { spawnWaWorker(); }
+
+async function sendWhatsApp(to, message) {
+  if (!to) return;
+  if (!waReady || !waWorker) {
+    // Mettre en file d'attente — sera envoyé dès que le worker sera prêt
+    _waMsgQueue.push({ to, text: message });
+    console.log(`[WhatsApp] En attente (queue: ${_waMsgQueue.length}) → ${to}`);
+    return;
+  }
+  try { waWorker.send({ type: 'send', to, text: message }); } catch (e) {
+    console.error('[WhatsApp] Erreur IPC :', e.message);
+  }
+}
 
 const app        = express();
 const PORT       = process.env.PORT       || 3000;
@@ -149,9 +219,23 @@ function validatePassword(pwd) {
 // ── SSE ───────────────────────────────────────────────────────────────────────
 const sseClients = new Map();
 
+// Écriture sécurisée sur un stream SSE — retourne false si la connexion est fermée
+function sseSend(res, payload) {
+  if (!res || res.writableEnded || res.destroyed) return false;
+  try {
+    res.write(payload);
+    return true;
+  } catch (e) {
+    // EPIPE ou write-after-end : connexion morte, on la retire
+    return false;
+  }
+}
+
 function sseNotify(userId, event, data) {
   const res = sseClients.get(String(userId));
-  if (res) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  if (!res) return;
+  const ok = sseSend(res, `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  if (!ok) sseClients.delete(String(userId));
 }
 
 app.get('/api/events', (req, res) => {
@@ -160,55 +244,75 @@ app.get('/api/events', (req, res) => {
   let user;
   try { user = jwt.verify(token, JWT_SECRET); } catch { return res.status(401).end(); }
 
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.write(`event: connected\ndata: ${JSON.stringify({ userId: user.id })}\n\n`);
+  res.setHeader('Content-Type',      'text/event-stream');
+  res.setHeader('Cache-Control',     'no-cache');
+  res.setHeader('Connection',        'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // désactive le buffering nginx si présent
+
+  // Absorbe les erreurs réseau (EPIPE, ECONNRESET) sans crasher Node
+  res.on('error', () => {
+    sseClients.delete(String(user.id));
+    try { res.destroy(); } catch {}
+  });
+
+  sseSend(res, `event: connected\ndata: ${JSON.stringify({ userId: user.id })}\n\n`);
   sseClients.set(String(user.id), res);
 
-  const ping = setInterval(() => res.write(': ping\n\n'), 25000);
+  const ping = setInterval(() => {
+    const ok = sseSend(res, ': ping\n\n');
+    if (!ok) { clearInterval(ping); sseClients.delete(String(user.id)); }
+  }, 25000);
+
   req.on('close', () => { clearInterval(ping); sseClients.delete(String(user.id)); });
 });
 
 // ── Helpers notifications ─────────────────────────────────────────────────────
 async function pushNotif(userId, userRole, type, title, message, data = {}) {
-  const notifs = await read('notifications');
-  const n = {
-    id: uid(), userId: String(userId), userRole, type,
-    title, message, data, read: false,
-    createdAt: new Date().toISOString(),
-  };
-  notifs.push(n);
-  await write('notifications', notifs);
-  sseNotify(userId, 'notification', n);
-  return n;
+  try {
+    const notifs = await read('notifications');
+    const n = {
+      id: uid(), userId: String(userId), userRole, type,
+      title, message, data, read: false,
+      createdAt: new Date().toISOString(),
+    };
+    notifs.push(n);
+    await write('notifications', notifs);
+    sseNotify(userId, 'notification', n);
+    return n;
+  } catch (e) {
+    console.error('[pushNotif] Error:', e.message);
+  }
 }
 
 // Notifie tous les employés des entreprises affiliées au restaurant que le menu a changé
 async function notifyMenuUpdate(restaurantId, restaurantName, changeType) {
-  const affiliations = (await read('affiliations')).filter(a => a.restaurantId === restaurantId);
-  if (!affiliations.length) return;
-  const employees = await read('employees');
-  const enterpriseIds = [...new Set(affiliations.map(a => a.enterpriseId))];
-  const titles = {
-    item_added:   '🍽️ Menu mis à jour',
-    item_updated: '🍽️ Menu mis à jour',
-    item_deleted: '🍽️ Menu mis à jour',
-    daily_updated:'📋 Menu du jour mis à jour',
-  };
-  const messages = {
-    item_added:   `${restaurantName} a ajouté un nouveau plat/boisson à son menu.`,
-    item_updated: `${restaurantName} a modifié un article de son menu.`,
-    item_deleted: `${restaurantName} a retiré un article de son menu.`,
-    daily_updated:`${restaurantName} a mis à jour son menu du jour.`,
-  };
-  const title   = titles[changeType]   || '🍽️ Menu mis à jour';
-  const message = messages[changeType] || `${restaurantName} a mis à jour son menu.`;
-  await Promise.all(
-    employees
-      .filter(e => enterpriseIds.includes(e.enterpriseId))
-      .map(e => pushNotif(e.id, 'employee', 'menu_updated', title, message, { restaurantId }))
-  );
+  try {
+    const affiliations = (await read('affiliations')).filter(a => a.restaurantId === restaurantId);
+    if (!affiliations.length) return;
+    const employees = await read('employees');
+    const enterpriseIds = [...new Set(affiliations.map(a => a.enterpriseId))];
+    const titles = {
+      item_added:   '🍽️ Menu mis à jour',
+      item_updated: '🍽️ Menu mis à jour',
+      item_deleted: '🍽️ Menu mis à jour',
+      daily_updated:'📋 Menu du jour mis à jour',
+    };
+    const messages = {
+      item_added:   `${restaurantName} a ajouté un nouveau plat/boisson à son menu.`,
+      item_updated: `${restaurantName} a modifié un article de son menu.`,
+      item_deleted: `${restaurantName} a retiré un article de son menu.`,
+      daily_updated:`${restaurantName} a mis à jour son menu du jour.`,
+    };
+    const title   = titles[changeType]   || '🍽️ Menu mis à jour';
+    const message = messages[changeType] || `${restaurantName} a mis à jour son menu.`;
+    await Promise.all(
+      employees
+        .filter(e => enterpriseIds.includes(e.enterpriseId))
+        .map(e => pushNotif(e.id, 'employee', 'menu_updated', title, message, { restaurantId }))
+    );
+  } catch (e) {
+    console.error('[notifyMenuUpdate] Error:', e.message);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -234,9 +338,10 @@ app.post('/api/login', async (req, res) => {
     if (found) { userObj = found; break; }
   }
 
-  // Chercher par nom complet dans les employés
+  // Chercher par identifiant employé (employeeId) ou nom complet
   if (!userObj) {
     userObj = (await read('employees')).find(u => {
+      if (u.employeeId && u.employeeId.toLowerCase() === id) return true;
       const n = u.fullName.toLowerCase();
       return n === id || n.split(' ').reverse().join(' ') === id;
     });
@@ -488,7 +593,7 @@ app.post('/api/restaurant/menu/items', auth, requireRole('restauratrice'), async
   let menu = menus.find(m => m.restaurantId === req.user.id);
   if (!menu) { menu = { restaurantId: req.user.id, items: [] }; menus.push(menu); }
 
-  const item = { id: uid(), name: name.trim(), category, price: Number(price), description: description || '' };
+  const item = { id: uid(), name: name.trim(), category, price: Number(price), description: description || '', available: true };
   menu.items.push(item);
   menu.updatedAt = new Date().toISOString();
   await write('menus', menus);
@@ -504,11 +609,12 @@ app.put('/api/restaurant/menu/items/:itemId', auth, requireRole('restauratrice')
   const idx = menu.items.findIndex(i => i.id === req.params.itemId);
   if (idx === -1) return res.status(404).json({ error: 'Article introuvable' });
 
-  const { name, category, price, description } = req.body;
+  const { name, category, price, description, available } = req.body;
   if (name        !== undefined) menu.items[idx].name = name.trim();
   if (category    !== undefined) menu.items[idx].category = category;
   if (price       !== undefined) menu.items[idx].price = Number(price);
   if (description !== undefined) menu.items[idx].description = description;
+  if (available   !== undefined) menu.items[idx].available = Boolean(available);
   menu.updatedAt = new Date().toISOString();
 
   await write('menus', menus);
@@ -536,13 +642,9 @@ app.delete('/api/restaurant/menu/items/:itemId', auth, requireRole('restauratric
   res.json({ success: true });
 });
 
-// Menu d'un restaurant (pour entreprises/employés affiliés)
+// Menu d'un restaurant (visible par toute entreprise pour consultation ; employés uniquement affiliés)
 app.get('/api/restaurants/:id/menu', auth, async (req, res) => {
-  if (req.user.role === 'enterprise') {
-    const aff = await read('affiliations');
-    if (!aff.some(a => a.enterpriseId === req.user.id && a.restaurantId === req.params.id))
-      return res.status(403).json({ error: 'Non affilié à ce restaurant' });
-  } else if (req.user.role === 'employee') {
+  if (req.user.role === 'employee') {
     const aff = await read('affiliations');
     if (!aff.some(a => a.enterpriseId === req.user.enterpriseId && a.restaurantId === req.params.id))
       return res.status(403).json({ error: 'Non affilié à ce restaurant' });
@@ -558,9 +660,14 @@ app.get('/api/restaurants/:id/menu', auth, async (req, res) => {
 app.get('/api/restaurant/menu/daily', auth, requireRole('restauratrice'), async (req, res) => {
   const date = req.query.date || todayStr();
   const dailyMenus = await read('dailyMenus');
-  const daily = dailyMenus.find(d => d.restaurantId === req.user.id && d.date === date)
-    || { restaurantId: req.user.id, date, availableItems: [] };
-  res.json(daily);
+  const daily = dailyMenus.find(d => d.restaurantId === req.user.id && d.date === date);
+  if (daily) {
+    res.json(daily);
+  } else {
+    // Default: all items are available
+    const menu = (await read('menus')).find(m => m.restaurantId === req.user.id) || { items: [] };
+    res.json({ restaurantId: req.user.id, date, availableItems: menu.items.map(i => i.id) });
+  }
 });
 
 app.put('/api/restaurant/menu/daily', auth, requireRole('restauratrice'), async (req, res) => {
@@ -593,12 +700,9 @@ app.get('/api/restaurants/:id/menu/daily', auth, async (req, res) => {
       return res.status(403).json({ error: 'Non affilié' });
   }
 
-  const date = req.query.date || todayStr();
-  const daily = (await read('dailyMenus')).find(d => d.restaurantId === req.params.id && d.date === date)
-    || { availableItems: [] };
-  const menu = (await read('menus')).find(m => m.restaurantId === req.params.id) || { items: [] };
-  const items = menu.items.filter(i => daily.availableItems.includes(i.id));
-  res.json({ date, restaurantId: req.params.id, items, foods: items.filter(i => i.category === 'food'), drinks: items.filter(i => i.category === 'drink') });
+  const menu  = (await read('menus')).find(m => m.restaurantId === req.params.id) || { items: [] };
+  const items = menu.items.filter(i => i.available !== false);
+  res.json({ restaurantId: req.params.id, items, foods: items.filter(i => i.category === 'food'), drinks: items.filter(i => i.category === 'drink') });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -638,19 +742,16 @@ app.get('/api/enterprise/restaurants', auth, requireRole('enterprise'), async (r
   const affiliations = (await read('affiliations')).filter(a => a.enterpriseId === req.user.id);
   const restaurants  = (await read('restaurants')).map(({ password, ...r }) => r);
   const menus        = await read('menus');
-  const dailyMenus   = await read('dailyMenus');
-  const t            = todayStr();
 
   const result = affiliations.map(a => {
     const r = restaurants.find(r => r.id === a.restaurantId);
     if (!r) return null;
-    const menu  = menus.find(m => m.restaurantId === a.restaurantId) || { items: [] };
-    const daily = dailyMenus.find(d => d.restaurantId === a.restaurantId && d.date === t) || { availableItems: [] };
-    const dailyItems = menu.items.filter(i => daily.availableItems.includes(i.id));
+    const menu = menus.find(m => m.restaurantId === a.restaurantId) || { items: [] };
+    const availableItems = menu.items.filter(i => i.available !== false);
     return {
       ...r, affiliatedAt: a.createdAt,
       menu: menu.items,
-      dailyMenu: { foods: dailyItems.filter(i => i.category === 'food'), drinks: dailyItems.filter(i => i.category === 'drink') },
+      dailyMenu: { foods: availableItems.filter(i => i.category === 'food'), drinks: availableItems.filter(i => i.category === 'drink') },
     };
   }).filter(Boolean);
 
@@ -724,30 +825,50 @@ app.get('/api/enterprise/employees', auth, requireRole('enterprise'), async (req
 });
 
 app.post('/api/enterprise/employees', auth, requireRole('enterprise'), async (req, res) => {
-  const { fullName, gender, password } = req.body;
-  if (!fullName || !password) return res.status(400).json({ error: 'Nom et mot de passe requis' });
+  const { firstName, lastName, whatsapp, gender, password, employeeId: customId } = req.body;
+  if (!firstName || !lastName) return res.status(400).json({ error: 'Prénom et nom requis' });
   if (!['male', 'female'].includes(gender)) return res.status(400).json({ error: 'Genre requis (male/female)' });
+  if (!customId || !/^[A-Za-z][A-Za-z0-9._-]{2,29}$/.test(String(customId))) return res.status(400).json({ error: 'ID employé invalide — commence par une lettre, 3 à 30 caractères' });
 
+  const finalPassword = (password && password.length >= 6) ? password : 'Temp1234';
+  if (password && password.length < 6) return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 6 caractères' });
+
+  const fullName = `${firstName.trim()} ${lastName.trim()}`;
   const employees = await read('employees');
-  const lower = fullName.toLowerCase().trim();
+
+  // Vérifier unicité du nom
+  const lower = fullName.toLowerCase();
   const dup = employees.find(e => {
     if (e.enterpriseId !== req.user.id) return false;
-    const n = e.fullName.toLowerCase();
+    const n = (e.fullName || '').toLowerCase();
     return n === lower || n.split(' ').reverse().join(' ') === lower;
   });
-  if (dup) return res.status(409).json({ error: 'Employé avec ce nom déjà existant' });
+  if (dup) return res.status(409).json({ error: 'Un employé avec ce nom existe déjà' });
 
-  const hashed = await bcrypt.hash(password, 10);
+  // Vérifier unicité de l'ID
+  if (employees.some(e => e.employeeId === customId)) return res.status(409).json({ error: 'Cet ID employé est déjà utilisé' });
+
+  const hashed = await bcrypt.hash(finalPassword, 10);
+  const employeeId = customId;
   const employee = {
-    id: uid(), fullName: fullName.trim(), gender, password: hashed,
+    id: uid(), employeeId, firstName: firstName.trim(), lastName: lastName.trim(),
+    fullName, gender, whatsapp: whatsapp || '', password: hashed,
     role: 'employee', enterpriseId: req.user.id, enterpriseName: req.user.companyName,
     createdAt: new Date().toISOString(),
   };
   employees.push(employee);
   await write('employees', employees);
 
+  // Envoyer identifiants par WhatsApp
+  if (whatsapp) {
+    const msg = `Bonjour ${firstName} 👋\n\nVotre compte LunchApp a été créé.\n\n` +
+      `🆔 Identifiant : ${employeeId}\n🔑 Mot de passe : ${finalPassword}\n\n` +
+      `Connectez-vous sur l'application et changez votre mot de passe si vous le souhaitez.`;
+    sendWhatsApp(whatsapp, msg);
+  }
+
   const { password: _, ...safe } = employee;
-  res.status(201).json(safe);
+  res.status(201).json({ ...safe, plainPassword: finalPassword });
 });
 
 app.put('/api/enterprise/employees/:id', auth, requireRole('enterprise'), async (req, res) => {
@@ -755,14 +876,27 @@ app.put('/api/enterprise/employees/:id', auth, requireRole('enterprise'), async 
   const idx = employees.findIndex(e => e.id === req.params.id && e.enterpriseId === req.user.id);
   if (idx === -1) return res.status(404).json({ error: 'Employé introuvable' });
 
-  const { fullName, gender, password, newPassword } = req.body;
-  if (fullName) employees[idx].fullName = fullName.trim();
-  if (gender)   employees[idx].gender = gender;
+  const { firstName, lastName, fullName, gender, whatsapp, password, newPassword, employeeId: newEmpId } = req.body;
+  if (firstName) { employees[idx].firstName = firstName.trim(); employees[idx].fullName = `${firstName.trim()} ${employees[idx].lastName || ''}`; }
+  if (lastName)  { employees[idx].lastName  = lastName.trim();  employees[idx].fullName = `${employees[idx].firstName || ''} ${lastName.trim()}`; }
+  if (fullName)  employees[idx].fullName = fullName.trim();
+  if (gender)    employees[idx].gender = gender;
+  if (whatsapp !== undefined) employees[idx].whatsapp = whatsapp;
+  if (newEmpId) {
+    if (!/^[A-Za-z][A-Za-z0-9._-]{2,29}$/.test(String(newEmpId))) return res.status(400).json({ error: 'ID employé invalide — commence par une lettre, 3 à 30 caractères' });
+    const clash = employees.find((e, i) => i !== idx && e.employeeId === newEmpId);
+    if (clash) return res.status(409).json({ error: 'Cet ID employé est déjà utilisé' });
+    employees[idx].employeeId = newEmpId;
+  }
 
   if (newPassword && password) {
+    if (newPassword.length < 6) return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 6 caractères' });
     const valid = await bcrypt.compare(password, employees[idx].password);
     if (!valid) return res.status(400).json({ error: 'Ancien mot de passe incorrect' });
     employees[idx].password = await bcrypt.hash(newPassword, 10);
+  } else if (password && password.length >= 6) {
+    // Direct password update (enterprise resetting employee password)
+    employees[idx].password = await bcrypt.hash(password, 10);
   }
   employees[idx].updatedAt = new Date().toISOString();
   await write('employees', employees);
@@ -780,6 +914,25 @@ app.delete('/api/enterprise/employees/:id', auth, requireRole('enterprise'), asy
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PROFIL EMPLOYÉ (self-update)
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.put('/api/employee/me', auth, requireRole('employee'), async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Mot de passe actuel et nouveau requis' });
+  if (newPassword.length < 6) return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 6 caractères' });
+  const employees = await read('employees');
+  const idx = employees.findIndex(e => e.id === req.user.id);
+  if (idx === -1) return res.status(404).json({ error: 'Employé introuvable' });
+  const valid = await bcrypt.compare(currentPassword, employees[idx].password);
+  if (!valid) return res.status(400).json({ error: 'Mot de passe actuel incorrect' });
+  employees[idx].password = await bcrypt.hash(newPassword, 10);
+  employees[idx].updatedAt = new Date().toISOString();
+  await write('employees', employees);
+  res.json({ success: true });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // CHOIX DES EMPLOYÉS
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -788,15 +941,12 @@ app.get('/api/employee/menus', auth, requireRole('employee'), async (req, res) =
   const affiliations = (await read('affiliations')).filter(a => a.enterpriseId === req.user.enterpriseId);
   const restaurants  = (await read('restaurants')).map(({ password, ...r }) => r);
   const menus        = await read('menus');
-  const dailyMenus   = await read('dailyMenus');
-  const t            = todayStr();
 
   const result = affiliations.map(a => {
     const r = restaurants.find(r => r.id === a.restaurantId);
     if (!r) return null;
-    const menu  = menus.find(m => m.restaurantId === a.restaurantId) || { items: [] };
-    const daily = dailyMenus.find(d => d.restaurantId === a.restaurantId && d.date === t) || { availableItems: [] };
-    const items = menu.items.filter(i => daily.availableItems.includes(i.id));
+    const menu   = menus.find(m => m.restaurantId === a.restaurantId) || { items: [] };
+    const items  = menu.items.filter(i => i.available !== false);
     const foods  = items.filter(i => i.category === 'food');
     const drinks = items.filter(i => i.category === 'drink');
     if (!foods.length && !drinks.length) return null;
@@ -2190,13 +2340,44 @@ app.get('/api/stats/public', async (req, res) => {
 });
 
 // ── Gestionnaire d'erreurs global (évite les crashs serveur) ─────────────────
-process.on('uncaughtException',  err => { /* ignore — keeps server running */ });
-process.on('unhandledRejection', ()  => { /* ignore — keeps server running */ });
+process.on('uncaughtException', err => {
+  console.error('[CRASH] Exception non capturée :', err.message);
+  console.error('[CRASH] Stack :', err.stack);
+});
+process.on('unhandledRejection', reason => {
+  console.error('[CRASH] Promesse rejetée :', reason?.message || reason);
+  if (reason?.stack) console.error('[CRASH] Stack :', reason.stack);
+});
+process.on('exit', code => {
+  console.log(`[EXIT] Process terminé — code ${code}`);
+});
+
+// ── Arrêt propre ─────────────────────────────────────────────────────────────
+async function gracefulShutdown(signal) {
+  if (_shuttingDown) return;
+  _shuttingDown = true;
+  if (_waRetryTimer) { clearTimeout(_waRetryTimer); _waRetryTimer = null; }
+  console.log(`\n[Shutdown] Signal ${signal} reçu — fermeture en cours…`);
+  try {
+    if (waWorker) {
+      waWorker.kill();
+      console.log('[Shutdown] Worker WhatsApp arrêté.');
+    }
+  } catch (e) {
+    console.error('[Shutdown] Erreur arrêt worker :', e.message);
+  }
+  process.exit(0);
+}
+
+['SIGINT', 'SIGTERM', 'SIGHUP'].forEach(sig => process.on(sig, () => gracefulShutdown(sig)));
 
 // ── Démarrage du serveur ──────────────────────────────────────────────────────
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`🚀 LunchApp v2 démarré → http://localhost:${PORT}`);
+    // WhatsApp initialisé APRÈS que le serveur HTTP est opérationnel
+    // → un crash Puppeteer ne peut plus tuer le serveur Express
+    setTimeout(initWhatsApp, 3000);
   });
 }
 

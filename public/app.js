@@ -29,9 +29,9 @@ let _confirmCallback  = null;
 
 const SPECIALTIES = [
   'Cuisine africaine','Cuisine ivoirienne','Cuisine burkinabè','Cuisine sénégalaise',
-  'Grillades / Brochettes','Fast food / Sandwichs','Pizzas','Burgers',
-  'Cuisine asiatique','Cuisine française','Fruits de mer','Soupes / Bouillons',
-  'Cuisine végétarienne','Pâtisserie / Desserts','Cuisine fusion',
+  'Grillades / Brochettes','Fast food / Sandwichs','Pizzas','Snack',
+  'Cuisine asiatique','Cuisine européenne','Fruits de mer','Soupes / Bouillons',
+  'Cuisine végétarienne','Pâtisserie / Desserts','Cuisine fusion','Boissons/Jus/Cocktail',
 ];
 
 function renderSpecialtyCheckboxes(containerId, selected = []) {
@@ -143,7 +143,7 @@ function pwdMeter(input, meterId) {
 function addPayEntry(containerId) {
   const div = document.createElement('div');
   div.className = 'pay-entry';
-  div.innerHTML = `<select class="pay-type"><option value="">Type</option>
+  div.innerHTML = `<select class="pay-type"><option value="">Type de paiement</option>
     <option value="OM">Orange Money</option><option value="Wave">Wave</option>
     <option value="Moov">Moov Money</option><option value="Telecash">Telecash</option></select>
     <input type="text" class="pay-num" placeholder="Numéro / code agent"/>
@@ -249,7 +249,8 @@ function switchRegType(type) {
 // ─── Panes ────────────────────────────────────────────────────────────────────
 function showPane(id) {
   document.querySelectorAll('.pane').forEach(p => p.classList.add('hidden'));
-  const target = el('pane-' + id);
+  const paneTarget = id;
+  const target = el('pane-' + paneTarget);
   if (target) {
     target.classList.remove('hidden');
     // Sidebar + bottom-nav highlight
@@ -266,12 +267,12 @@ function onPaneLoad(id) {
     case 'clientele':       loadClientele(); break;
     case 'rst-messages':    loadConversations(''); break;
     case 'ent-today':       loadEntToday(); break;
-    case 'ent-restaurants': loadEntRestaurants(); break;
-    case 'ent-menus':       loadEntMenus(); break;
+    case 'ent-restaurants': _restoTabMode = 'all'; loadEntRestaurants(); break;
     case 'ent-employees':   switchEntTab('emps'); break;
     case 'ent-messages':    loadConversations('ent'); break;
     case 'emp-menu':        loadEmpMenu(); break;
     case 'emp-history':     loadEmpHistory(); break;
+    case 'emp-profile':     loadEmpProfile(); break;
     case 'admin':           loadAdminStats(); break;
     case 'notifs':          loadNotifs(); break;
   }
@@ -305,13 +306,13 @@ function buildSidebar(role) {
     enterprise: [
       { id: 'ent-today',       icon: '📋', label: 'Aujourd\'hui' },
       { id: 'ent-restaurants', icon: '🍴', label: 'Restaurants' },
-      { id: 'ent-menus',       icon: '🗒️', label: 'Menus' },
       { id: 'ent-employees',   icon: '👥', label: 'Gestion' },
       { id: 'ent-messages',    icon: '💬', label: 'Messages' },
     ],
     employee: [
-      { id: 'emp-menu',    icon: '🍽️', label: 'Menu du jour' },
-      { id: 'emp-history', icon: '📜', label: 'Mon historique' },
+      { id: 'emp-menu',     icon: '🍽️', label: 'Menu du jour' },
+      { id: 'emp-history',  icon: '📜', label: 'Mon historique' },
+      { id: 'emp-profile',  icon: '👤', label: 'Mon profil' },
     ],
     superadmin: [
       { id: 'admin', icon: '⚙️', label: 'Administration' },
@@ -488,19 +489,22 @@ async function updateNotifBadge() {
 async function loadRestoHome() {
   try {
     const r = await api('GET', '/api/restaurant/me');
+    const specs = Array.isArray(r.specialty) ? r.specialty : (r.specialty ? r.specialty.split(',').map(s=>s.trim()).filter(Boolean) : []);
     el('resto-profile-view').innerHTML = `
-      <div class="dash-welcome">
-        ${r.photo
-          ? `<img src="${esc(r.photo)}" class="dash-welcome-photo"/>`
-          : '<div class="dash-welcome-ph">🍴</div>'}
-        <div class="dash-welcome-info">
-          <h2>${esc(r.restaurantName)}</h2>
-          <p>${esc(r.fullName)}${r.phone ? ' · ' + esc(r.phone) : ''}</p>
-          ${r.specialty ? `<p style="opacity:.75;font-size:12px;margin-top:2px">${esc(r.specialty)}</p>` : ''}
-          ${r.address   ? `<p style="opacity:.7;font-size:12px">📍 ${esc(r.address)}</p>` : ''}
-          ${r.paymentInfo?.length ? `<p style="opacity:.7;font-size:12px">💳 ${r.paymentInfo.map(p=>`${p.type}: ${esc(p.number)}`).join(' · ')}</p>` : ''}
+      <div class="resto-profile-card">
+        <div class="rpc-top">
+          ${r.photo
+            ? `<img src="${esc(r.photo)}" class="rpc-photo"/>`
+            : `<div class="rpc-ph">${r.restaurantName.charAt(0).toUpperCase()}</div>`}
+          <div class="rpc-info">
+            <h2 class="rpc-name">${esc(r.restaurantName)}</h2>
+            <p class="rpc-owner">${esc(r.fullName)}${r.phone ? ' · 📞 ' + esc(r.phone) : ''}</p>
+            ${r.address ? `<p class="rpc-loc">📍 ${esc(r.address)}</p>` : ''}
+          </div>
+          <button class="btn ghost sm" onclick="openProfileModal()">✏️ Modifier</button>
         </div>
-        <button class="btn sm welcome-edit" onclick="openProfileModal()">✏️ Modifier</button>
+        ${specs.length ? `<div class="rpc-specs">${specs.map(s=>`<span class="spec-pill">${esc(s)}</span>`).join('')}</div>` : ''}
+        ${r.paymentInfo?.length ? `<div class="rpc-pay">${r.paymentInfo.map(p=>`<span class="pay-pill">💳 ${esc(p.type)}: ${esc(p.number)}</span>`).join('')}</div>` : ''}
       </div>`;
     await loadRestoStats();
   } catch (e) { toast(e.message, 'error'); }
@@ -511,11 +515,8 @@ async function loadRestoStats() {
   try {
     const s = await api('GET', `/api/stats/restaurant?frequency=${freq}`);
     const topItems = Object.entries(s.itemCounts || {}).sort((a,b) => b[1]-a[1]).slice(0,5);
+    const max = topItems[0]?.[1] || 1;
     el('rst-stats').innerHTML = `
-      <div class="section-header">
-        <div class="section-icon">📊</div>
-        <h3>Statistiques</h3>
-      </div>
       <div class="kpi-grid">
         <div class="kpi-card">
           <div class="kpi-icon">📦</div>
@@ -527,15 +528,25 @@ async function loadRestoStats() {
         </div>
         <div class="kpi-card blue">
           <div class="kpi-icon">⭐</div>
-          <div class="kpi-body"><div class="kpi-num">${s.avgRating ? s.avgRating.toFixed(1) : '—'}</div><div class="kpi-lbl">Note moyenne (${s.ratingCount} avis)</div></div>
+          <div class="kpi-body">
+            <div class="kpi-num">${s.avgRating ? s.avgRating.toFixed(1) : '—'}</div>
+            <div class="kpi-lbl">Note moy. (${s.ratingCount || 0} avis)</div>
+          </div>
         </div>
       </div>
       ${topItems.length ? `
-      <div class="section-header" style="margin-top:8px">
-        <div class="section-icon">🏆</div>
-        <h3>Plats les plus demandés</h3>
-      </div>
-      <ul class="item-list">${topItems.map(([n,c]) => `<li>${esc(n)} <span class="badge">${c}x</span></li>`).join('')}</ul>` : ''}`;
+        <div class="stats-section-title">🏆 Plats les plus demandés</div>
+        <div class="rank-list">
+          ${topItems.map(([n,c], i) => `
+            <div class="rank-row">
+              <span class="rank-pos">${i+1}</span>
+              <div class="rank-bar-wrap">
+                <span class="rank-name">${esc(n)}</span>
+                <div class="rank-bar"><div class="rank-fill" style="width:${Math.round(c/max*100)}%"></div></div>
+              </div>
+              <span class="rank-count">${c}x</span>
+            </div>`).join('')}
+        </div>` : ''}`;
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -686,81 +697,45 @@ async function loadMenus() {
     const drinks = items.filter(i => i.category === 'drink');
 
     function renderItems(arr) {
-      if (!arr.length) return '<p class="empty">Aucun article.</p>';
-      return arr.map(i => {
+      if (!arr.length) return '<p class="empty" style="padding:12px 0">Aucun article.</p>';
+      return `<div class="menu-item-list">` + arr.map(i => {
         _menuItemCache[i.id] = i;
-        return `<div class="item-row">
-          <div class="item-main">
-            <span class="item-name">${esc(i.name)}</span>
-            ${i.description ? `<span class="item-desc">${esc(i.description)}</span>` : ''}
+        const avail = i.available !== false;
+        return `<div class="menu-item-card${avail ? '' : ' item-unavailable'}">
+          <div class="mic-body">
+            <span class="mic-name">${esc(i.name)}</span>
+            ${i.description ? `<span class="mic-desc">${esc(i.description)}</span>` : ''}
+            <span class="mic-price">${fmtPrice(i.price)}</span>
           </div>
-          <span class="item-price">${fmtPrice(i.price)}</span>
-          <button class="btn ghost sm" onclick="openItemModal('${i.id}')">✏️</button>
-          <button class="btn danger sm" onclick="deleteItem('${i.id}')">🗑️</button>
+          <div class="mic-actions">
+            <label class="toggle-switch" title="${avail ? 'Disponible' : 'Indisponible'}">
+              <input type="checkbox" ${avail ? 'checked' : ''} onchange="toggleItemAvailability('${i.id}', this.checked)"/>
+              <span class="slider"></span>
+            </label>
+            <button class="btn ghost sm" onclick="openItemModal('${i.id}')">✏️</button>
+            <button class="btn danger sm" onclick="deleteItem('${i.id}')">🗑️</button>
+          </div>
         </div>`;
-      }).join('');
+      }).join('') + `</div>`;
     }
 
     el('full-menu-list').innerHTML = `
-      <div class="pane-header" style="margin-top:8px">
-        <h3>🍽️ Nourriture (${foods.length})</h3>
+      <div class="menu-section-head">
+        <span class="menu-section-label">🍽️ Nourriture <span class="menu-count">${foods.length}</span></span>
         <button class="btn primary sm" onclick="openItemModal(null,'food')">+ Plat</button>
       </div>${renderItems(foods)}
-      <div class="pane-header" style="margin-top:16px">
-        <h3>🥤 Boissons (${drinks.length})</h3>
+      <div class="menu-section-head" style="margin-top:20px">
+        <span class="menu-section-label">🥤 Boissons <span class="menu-count">${drinks.length}</span></span>
         <button class="btn primary sm" onclick="openItemModal(null,'drink')">+ Boisson</button>
       </div>${renderItems(drinks)}`;
 
-    // Daily menu
-    if (!el('day-label').textContent) el('day-label').textContent = fmtDate(_dailyDate);
-    await loadDailyMenu(items);
   } catch (e) { toast(e.message, 'error'); }
 }
 
-function shiftDay(n) {
-  const d = new Date(_dailyDate + 'T00:00:00');
-  d.setDate(d.getDate() + n);
-  _dailyDate = d.toISOString().slice(0, 10);
-  el('day-label').textContent = fmtDate(_dailyDate);
-  loadDailyMenuOnly();
-}
-
-async function loadDailyMenuOnly() {
+async function toggleItemAvailability(itemId, available) {
   try {
-    const menu = await api('GET', '/api/restaurant/menu');
-    await loadDailyMenu(menu.items || []);
-  } catch {}
-}
-
-async function loadDailyMenu(allItems) {
-  try {
-    const daily = await api('GET', `/api/restaurant/menu/daily?date=${_dailyDate}`);
-    const available = new Set(daily.availableItems || []);
-
-    if (!allItems.length) { el('daily-menu-list').innerHTML = '<p class="empty">Ajoutez d\'abord des articles.</p>'; return; }
-
-    el('daily-menu-list').innerHTML = allItems.map(i => `
-      <div class="daily-row">
-        <label class="toggle-label">
-          <span class="item-name">${esc(i.name)}</span>
-          <span class="item-cat">${i.category === 'food' ? '🍽️' : '🥤'}</span>
-        </label>
-        <label class="toggle-switch">
-          <input type="checkbox" ${available.has(i.id) ? 'checked' : ''}
-            onchange="toggleDailyItem('${i.id}', this.checked)"/>
-          <span class="slider"></span>
-        </label>
-      </div>`).join('');
-  } catch (e) { toast(e.message, 'error'); }
-}
-
-async function toggleDailyItem(itemId, checked) {
-  try {
-    const daily = await api('GET', `/api/restaurant/menu/daily?date=${_dailyDate}`);
-    let available = daily.availableItems || [];
-    if (checked) { if (!available.includes(itemId)) available.push(itemId); }
-    else          { available = available.filter(id => id !== itemId); }
-    await api('PUT', '/api/restaurant/menu/daily', { date: _dailyDate, availableItems: available });
+    await api('PUT', `/api/restaurant/menu/items/${itemId}`, { available });
+    await loadMenus();
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -804,101 +779,342 @@ async function deleteItem(id) {
 // RESTAURANT — Clientèle
 // ═══════════════════════════════════════════════════════════════════════════
 
+function switchClienteleTab(tab) {
+  ['today', 'search', 'subs'].forEach(t => {
+    const btn   = el('ctab-' + t);
+    const panel = el('ctab-panel-' + t);
+    if (btn)   btn.classList.toggle('active', t === tab);
+    if (panel) panel.classList.toggle('hidden', t !== tab);
+  });
+}
+
+// Store for archives filtering
+let _allArchiveOrders = [];
+let _archiveByEnt = {};
+
 async function loadClientele() {
+  // Affiche la date du jour dans l'en-tête
+  const dateEl = el('cmd-today-date');
+  if (dateEl) dateEl.textContent = new Date().toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+
   try {
-    const [clients, orders, subs, enterprises, invoices] = await Promise.all([
+    const [clients, orders, subs, invoices] = await Promise.all([
       api('GET', '/api/restaurant/clientele'),
       api('GET', '/api/orders'),
       api('GET', '/api/subscriptions'),
-      api('GET', '/api/restaurant/enterprises'),
       api('GET', '/api/invoices'),
     ]);
 
     const invoiceByOrder = {};
-    invoices.forEach(i => { invoiceByOrder[i.orderId] = i; });
+    invoices.forEach(i => { if (i.orderId) invoiceByOrder[i.orderId] = i; });
 
-    // Grouper commandes par entreprise
-    const byEnt = {};
-    orders.forEach(o => {
-      if (!byEnt[o.enterpriseId]) byEnt[o.enterpriseId] = { name: o.enterpriseName, orders: [] };
-      byEnt[o.enterpriseId].orders.push(o);
+    const today = todayStr();
+    const todayOrders = orders.filter(o => o.date === today);
+    const archiveOrders = orders.filter(o => o.date !== today);
+
+    // ── COMMANDES DU JOUR ────────────────────────────────────────────────────
+    const todayOrdersByEnt = {};
+    todayOrders.forEach(o => {
+      if (!todayOrdersByEnt[o.enterpriseId]) todayOrdersByEnt[o.enterpriseId] = { name: o.enterpriseName, orders: [] };
+      todayOrdersByEnt[o.enterpriseId].orders.push(o);
     });
-    // Ajouter les affiliés sans commandes
-    clients.forEach(c => {
-      if (!byEnt[c.id]) byEnt[c.id] = { name: c.companyName, orders: [], todayChoices: c.todayChoices || [] };
-      else byEnt[c.id].todayChoices = c.todayChoices || [];
+
+    // Flat rows for the summary table (enterprise × item)
+    const rowMap = {};
+    let totalRepas = 0;
+    todayOrders.forEach(o => {
+      (o.items || []).forEach(item => {
+        const it = item.foodItem || item.drinkItem;
+        if (!it) return;
+        totalRepas++;
+        const key = `${o.enterpriseId}||${it.name}`;
+        if (!rowMap[key]) rowMap[key] = { enterprise: o.enterpriseName, designation: it.name, qty: 0, unitPrice: it.price };
+        rowMap[key].qty++;
+      });
     });
+    const tableRows = Object.values(rowMap);
+    const totalGlobal = tableRows.reduce((s, r) => s + r.qty * r.unitPrice, 0);
+    const nbCommandes = todayOrders.length;
 
-    const statusBtns = o => {
-      const inv = invoiceByOrder[o.id];
-      const actions = [];
-      if (o.status === 'pending')   actions.push(`<button class="btn primary sm" onclick="updateOrderStatus('${o.id}','confirmed')">✅ Accuser réception</button>`);
-      if (o.status === 'confirmed') actions.push(`<button class="btn ghost sm" onclick="updateOrderStatus('${o.id}','preparing')">🍳 En préparation</button>`);
-      if (['confirmed','preparing'].includes(o.status)) actions.push(`<button class="btn success sm" onclick="updateOrderStatus('${o.id}','delivered')">🚚 Livrée</button>`);
-      if (!inv && o.status !== 'pending') actions.push(`<button class="btn primary sm" onclick="createInvoice('${o.id}')">🧾 Faire la facture</button>`);
-      if (inv) actions.push(`<button class="btn outline sm" onclick="downloadInvoice('${inv.id}')">⬇ Facture (${inv.status})</button>`);
-      return actions.join('');
-    };
+    // KPI bar
+    const kpiHtml = `
+      <div class="cmd-kpi-row">
+        <div class="cmd-kpi cmd-kpi--blue">
+          <span class="cmd-kpi-value">${nbCommandes}</span>
+          <span class="cmd-kpi-label">Commande${nbCommandes > 1 ? 's' : ''}</span>
+        </div>
+        <div class="cmd-kpi cmd-kpi--green">
+          <span class="cmd-kpi-value">${totalRepas}</span>
+          <span class="cmd-kpi-label">Repas commandés</span>
+        </div>
+        <div class="cmd-kpi cmd-kpi--orange">
+          <span class="cmd-kpi-value">${fmtPrice(totalGlobal)}</span>
+          <span class="cmd-kpi-label">Chiffre du jour</span>
+        </div>
+      </div>`;
 
-    el('clientele-list').innerHTML = Object.values(byEnt).length
-      ? Object.values(byEnt).map(g => `
-          <div class="enterprise-group">
-            <div class="group-header">
-              <strong>🏢 ${esc(g.name)}</strong>
-              <span class="badge">${(g.todayChoices||[]).length} choix aujourd'hui</span>
+    if (tableRows.length) {
+      el('clientele-today-table').innerHTML = `
+        ${kpiHtml}
+        <div class="cmd-section-title">📋 Récapitulatif des commandes</div>
+        <div class="cmd-table-wrap">
+          <table class="choice-table">
+            <thead><tr><th>Entreprise</th><th>Désignation</th><th style="text-align:center">Qté</th><th style="text-align:right">Total</th></tr></thead>
+            <tbody>
+              ${tableRows.map(r => `<tr>
+                <td><span class="cmd-ent-tag">🏢</span> ${esc(r.enterprise)}</td>
+                <td>${esc(r.designation)}</td>
+                <td style="text-align:center"><span class="qty-badge">${r.qty}</span></td>
+                <td style="text-align:right;font-weight:600;color:var(--orange)">${fmtPrice(r.qty * r.unitPrice)}</td>
+              </tr>`).join('')}
+            </tbody>
+            <tfoot><tr>
+              <td colspan="2" style="text-align:right">Total général</td>
+              <td style="text-align:center">${totalRepas}</td>
+              <td style="text-align:right">${fmtPrice(totalGlobal)}</td>
+            </tr></tfoot>
+          </table>
+        </div>
+        <div class="cmd-section-title" style="margin-top:20px">🏢 Détails par entreprise</div>
+        ${Object.entries(todayOrdersByEnt).map(([entId, g]) => `
+          <div class="cmd-ent-block">
+            <div class="cmd-ent-header" onclick="toggleEntGroup(this)">
+              <div class="cmd-ent-info">
+                <span class="cmd-ent-name">🏢 ${esc(g.name)}</span>
+                <span class="badge">${g.orders.length} commande${g.orders.length > 1 ? 's' : ''}</span>
+              </div>
+              <span class="toggle-arrow">▼</span>
             </div>
-            ${g.orders.length ? `
-            <table class="choice-table" style="margin-top:10px">
-              <thead><tr><th>Date</th><th>Repas</th><th>Total</th><th>Statut</th><th>Actions</th></tr></thead>
-              <tbody>${g.orders.map(o => `<tr>
-                <td>${fmtDateTime(o.createdAt)}</td>
-                <td>${o.items?.length||0} repas</td>
-                <td>${fmtPrice(o.totalAmount)}</td>
-                <td><span class="badge ${o.status}">${o.status}</span></td>
-                <td class="order-btns">${statusBtns(o)}</td>
-              </tr>`).join('')}</tbody>
-            </table>` : '<p class="empty" style="margin:6px 0">Aucune commande pour cette entreprise.</p>'}
-          </div>`).join('')
-      : '<p class="empty">Aucune entreprise affiliée.</p>';
+            <div class="ent-order-details hidden">
+              ${g.orders.map(o => renderTodayOrderDetails(o, invoiceByOrder)).join('')}
+            </div>
+          </div>`).join('')}`;
+    } else {
+      const clientRows = clients.length
+        ? clients.map(c => `
+            <div class="cmd-waiting-ent">
+              <div class="cmd-waiting-left">
+                <span class="cmd-ent-avatar">${esc(c.companyName.charAt(0).toUpperCase())}</span>
+                <span class="cmd-ent-name">${esc(c.companyName)}</span>
+              </div>
+              <span class="badge pending">⏳ En attente</span>
+            </div>`).join('')
+        : '';
+      el('clientele-today-table').innerHTML = `
+        ${kpiHtml}
+        <div class="cmd-empty-state">
+          <div class="cmd-empty-icon">🕐</div>
+          <p class="cmd-empty-title">Aucune commande pour aujourd'hui</p>
+          <p class="cmd-empty-sub">Les commandes apparaîtront ici dès qu'une entreprise affiliée passera commande.</p>
+        </div>
+        ${clientRows ? `<div class="cmd-section-title">🏢 Entreprises affiliées</div>${clientRows}` : ''}`;
+    }
 
-    // Abonnements
+    // ── RECHERCHER COMMANDES ─────────────────────────────────────────────
+    _allArchiveOrders = archiveOrders;
+    _archiveByEnt = {};
+    archiveOrders.forEach(o => {
+      if (!_archiveByEnt[o.enterpriseId]) _archiveByEnt[o.enterpriseId] = { name: o.enterpriseName, orders: [] };
+      _archiveByEnt[o.enterpriseId].orders.push(o);
+    });
+    renderArchives(invoiceByOrder);
+
+    // ── ABONNEMENTS ──────────────────────────────────────────────────────
     const freqLabels = { weekly: 'Hebdomadaire', monthly: 'Mensuel', quarterly: 'Trimestriel', 'semi-annual': 'Semestriel', annual: 'Annuel' };
     const statusLabels = { pending: 'En attente', accepted: 'Actif', declined: 'Refusé' };
+    const subStatusIcon = { pending: '⏳', accepted: '✅', declined: '❌', cancelled: '🚫' };
     el('rst-subs-list').innerHTML = subs.length
       ? subs.map(s => {
           const hasSubInvoice = invoices.some(i => i.subscriptionId === s.id);
-          return `
-          <div class="sub-card">
-            <div>
-              <span><strong>${esc(s.enterpriseName)}</strong> — <em>${freqLabels[s.frequency] || s.frequency}</em></span>
-              <span class="badge ${s.status}">${statusLabels[s.status] || s.status}</span>
+          return `<div class="sub-card sub-card--${s.status}">
+            <div class="sub-card-left">
+              <div class="sub-card-avatar">${esc(s.enterpriseName.charAt(0).toUpperCase())}</div>
+              <div class="sub-card-info">
+                <span class="sub-card-name">${esc(s.enterpriseName)}</span>
+                <span class="sub-card-freq">🔁 ${freqLabels[s.frequency] || s.frequency}</span>
+              </div>
             </div>
-            ${s.status === 'pending' ? `
-              <div class="sub-btns">
-                <button class="btn primary sm" onclick="respondSub('${s.id}','accepted')">✓ Accepter</button>
-                <button class="btn danger sm"  onclick="respondSub('${s.id}','declined')">✕ Refuser</button>
-              </div>` : ''}
-            ${s.status === 'accepted' ? `
-              <div class="sub-btns">
-                ${hasSubInvoice
-                  ? '<span class="badge success">✅ Facture envoyée</span>'
-                  : `<button class="btn primary sm" onclick="createSubInvoice('${s.id}')">🧾 Générer la facture</button>`}
-              </div>` : ''}
+            <div class="sub-card-right">
+              <span class="badge ${s.status}">${subStatusIcon[s.status] || ''} ${statusLabels[s.status] || s.status}</span>
+              ${s.status === 'pending' ? `
+                <div class="sub-btns">
+                  <button class="btn primary sm" onclick="respondSub('${s.id}','accepted')">✓ Accepter</button>
+                  <button class="btn danger sm" onclick="respondSub('${s.id}','declined')">✕ Refuser</button>
+                </div>` : ''}
+              ${s.status === 'accepted' ? `
+                <div class="sub-btns">
+                  ${hasSubInvoice
+                    ? '<span class="badge success" style="font-size:11px">✅ Facture envoyée</span>'
+                    : `<button class="btn primary sm" onclick="createSubInvoice('${s.id}')">🧾 Facture</button>`}
+                </div>` : ''}
+            </div>
           </div>`;
         }).join('')
-      : '<p class="empty">Aucune demande d\'abonnement.</p>';
+      : `<div class="cmd-empty-state">
+           <div class="cmd-empty-icon">🔔</div>
+           <p class="cmd-empty-title">Aucun abonnement en cours</p>
+           <p class="cmd-empty-sub">Les demandes d'abonnement des entreprises affiliées apparaîtront ici.</p>
+         </div>`;
 
-    // Proposer services
-    el('rst-enterprises-list').innerHTML = enterprises.map(e => `
-      <div class="ent-row">
-        <span>${esc(e.companyName)}</span>
-        ${e.isAffiliated ? '<span class="badge success">Affiliée</span>' : ''}
-        ${!e.hasOffer && !e.isAffiliated
-          ? `<button class="btn primary sm" onclick="offerService('${e.id}')">📤 Proposer</button>`
-          : e.hasOffer && !e.isAffiliated
-          ? `<button class="btn outline sm" onclick="withdrawOffer('${e.id}')">Retirer l'offre</button>`
-          : ''}
-      </div>`).join('') || '<p class="empty">Aucune entreprise.</p>';
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function renderTodayOrderDetails(o, invoiceByOrder) {
+  // Aggregate items
+  const itemMap = {};
+  (o.items || []).forEach(item => {
+    if (item.foodItem)  { itemMap[item.foodItem.name] = (itemMap[item.foodItem.name] || 0) + 1; }
+    if (item.drinkItem) { itemMap[item.drinkItem.name] = (itemMap[item.drinkItem.name] || 0) + 1; }
+  });
+  const itemLines = Object.entries(itemMap).map(([n, c]) => `<li>${esc(n)} × ${c}</li>`).join('');
+  const inv = invoiceByOrder[o.id];
+
+  const statusBtns = [];
+  if (o.status === 'pending')   statusBtns.push(`<button class="btn primary sm" onclick="updateOrderStatus('${o.id}','confirmed')">✅ Accuser réception</button>`);
+  if (o.status === 'confirmed') statusBtns.push(`<button class="btn ghost sm" onclick="updateOrderStatus('${o.id}','preparing')">🍳 En préparation</button>`);
+  if (['confirmed','preparing'].includes(o.status)) statusBtns.push(`<button class="btn success sm" onclick="updateOrderStatus('${o.id}','delivered')">🚚 Livrée</button>`);
+
+  return `<div class="order-detail-card">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <span class="badge ${o.status}">${o.status}</span>
+      <span style="font-weight:700;color:var(--orange)">${fmtPrice(o.totalAmount)}</span>
+    </div>
+    <ul style="margin:8px 0;padding-left:18px;font-size:13px">${itemLines || '<li>Aucun plat</li>'}</ul>
+    <p style="font-size:12px;color:var(--gray)">Total : ${o.items?.length || 0} repas — ${fmtDateTime(o.createdAt)}</p>
+    <div class="order-btns" style="margin-top:8px">
+      ${statusBtns.join('')}
+      ${!inv && o.status !== 'pending'
+        ? `<button class="btn primary sm" onclick="emettreFact('${o.id}','${esc(o.enterpriseName)}')">🧾 Émettre la facture</button>`
+        : inv ? `<button class="btn outline sm" onclick="downloadInvoice('${inv.id}','${esc(inv.enterpriseName)}')">⬇ Télécharger facture</button>` : ''}
+    </div>
+  </div>`;
+}
+
+function toggleEntGroup(headerEl) {
+  const details = headerEl.nextElementSibling;
+  const arrow = headerEl.querySelector('.toggle-arrow');
+  if (details) {
+    details.classList.toggle('hidden');
+    if (arrow) arrow.textContent = details.classList.contains('hidden') ? '▼' : '▲';
+  }
+}
+
+function toggleAccordion(headerEl) {
+  const body  = headerEl.nextElementSibling;
+  const arrow = headerEl.querySelector('.toggle-arrow');
+  if (body) {
+    body.classList.toggle('hidden');
+    if (arrow) arrow.textContent = body.classList.contains('hidden') ? '▼' : '▲';
+  }
+}
+
+function renderArchives(invoiceByOrder) {
+  const fromVal = el('arch-date-from')?.value;
+  const toVal   = el('arch-date-to')?.value;
+
+  const filteredOrders = _allArchiveOrders.filter(o => {
+    if (fromVal && o.date < fromVal) return false;
+    if (toVal   && o.date > toVal)   return false;
+    return true;
+  });
+
+  // Update filter summary
+  const sumEl = el('arch-filter-summary');
+  if (sumEl) {
+    if (fromVal || toVal) {
+      const parts = [];
+      if (fromVal) parts.push('du <strong>' + new Date(fromVal + 'T00:00:00').toLocaleDateString('fr-FR') + '</strong>');
+      if (toVal)   parts.push('au <strong>' + new Date(toVal   + 'T00:00:00').toLocaleDateString('fr-FR') + '</strong>');
+      sumEl.innerHTML = `${filteredOrders.length} commande(s) trouvée(s) ${parts.join(' ')}`;
+      sumEl.classList.remove('hidden');
+    } else {
+      sumEl.innerHTML = '';
+      sumEl.classList.add('hidden');
+    }
+  }
+
+  const archByEnt = {};
+  filteredOrders.forEach(o => {
+    if (!archByEnt[o.enterpriseId]) archByEnt[o.enterpriseId] = { name: o.enterpriseName, orders: [] };
+    archByEnt[o.enterpriseId].orders.push(o);
+  });
+
+  const statusLabels = { pending: 'En attente', confirmed: 'Confirmée', preparing: 'En préparation', delivered: 'Livrée', cancelled: 'Annulée' };
+
+  el('clientele-archives').innerHTML = Object.keys(archByEnt).length
+    ? Object.entries(archByEnt).map(([entId, g]) => {
+        const totalCmd = g.orders.length;
+        const totalCA  = g.orders.reduce((s, o) => s + (o.totalAmount || 0), 0);
+        const initial  = g.name.charAt(0).toUpperCase();
+        return `
+        <div class="arch-ent-block">
+          <div class="arch-ent-header" onclick="toggleEntGroup(this)">
+            <div class="arch-ent-left">
+              <span class="arch-ent-avatar">${initial}</span>
+              <div class="arch-ent-meta">
+                <span class="arch-ent-name">${esc(g.name)}</span>
+                <span class="arch-ent-stats">${totalCmd} commande${totalCmd > 1 ? 's' : ''} · ${fmtPrice(totalCA)}</span>
+              </div>
+            </div>
+            <span class="toggle-arrow">▼</span>
+          </div>
+          <div class="arch-ent-orders hidden">
+            <table class="choice-table">
+              <thead><tr><th>Date</th><th>Repas</th><th>Total</th><th>Statut</th><th>Facture</th></tr></thead>
+              <tbody>${g.orders.sort((a,b) => new Date(b.createdAt)-new Date(a.createdAt)).map(o => {
+                const inv = invoiceByOrder ? invoiceByOrder[o.id] : null;
+                return `<tr>
+                  <td style="white-space:nowrap">${fmtDateTime(o.createdAt)}</td>
+                  <td>${o.items?.length || 0} repas</td>
+                  <td style="font-weight:600">${fmtPrice(o.totalAmount)}</td>
+                  <td><span class="badge ${o.status}">${statusLabels[o.status] || o.status}</span></td>
+                  <td>${inv
+                    ? `<button class="btn ghost sm" onclick="downloadInvoice('${inv.id}','${esc(inv.enterpriseName)}')">⬇ PDF</button>`
+                    : o.status !== 'pending'
+                    ? `<button class="btn primary sm" onclick="emettreFact('${o.id}','${esc(o.enterpriseName)}')">🧾 Émettre</button>`
+                    : '—'}</td>
+                </tr>`;
+              }).join('')}</tbody>
+            </table>
+          </div>
+        </div>`;
+      }).join('')
+    : `<div class="cmd-empty-state">
+         <div class="cmd-empty-icon">🔍</div>
+         <p class="cmd-empty-title">Aucune commande${fromVal || toVal ? ' pour cette période' : ''}</p>
+         <p class="cmd-empty-sub">${fromVal || toVal ? 'Essayez d\'élargir la plage de dates.' : 'Les commandes passées apparaîtront ici.'}</p>
+       </div>`;
+}
+
+function filterArchives() {
+  // Need invoiceByOrder - re-fetch or use cached
+  api('GET', '/api/invoices').then(invoices => {
+    const invoiceByOrder = {};
+    invoices.forEach(i => { if (i.orderId) invoiceByOrder[i.orderId] = i; });
+    renderArchives(invoiceByOrder);
+  }).catch(() => renderArchives(null));
+}
+
+function clearArchiveFilter() {
+  const fromEl = el('arch-date-from');
+  const toEl = el('arch-date-to');
+  if (fromEl) fromEl.value = '';
+  if (toEl) toEl.value = '';
+  filterArchives();
+}
+
+async function emettreFact(orderId, enterpriseName) {
+  try {
+    const invoice = await api('POST', '/api/invoices', { orderId });
+    toast('Facture émise et envoyée à l\'entreprise !', 'success');
+    // Offer restaurant to download a copy
+    const clean = (enterpriseName || 'entreprise').replace(/[^a-zA-Z0-9]/g, '_');
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0,10).replace(/-/g,'');
+    const timeStr = `${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
+    const filename = `Facture_${clean}_${dateStr}_${timeStr}.pdf`;
+    await downloadInvoiceById(invoice.id, filename);
+    loadClientele();
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -920,15 +1136,24 @@ async function createSubInvoice(subId) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
-// Télécharger une facture (restaurant)
-async function downloadInvoice(invoiceId) {
+// Télécharger une facture avec nom de fichier correct
+async function downloadInvoice(invoiceId, enterpriseName) {
+  const clean = (enterpriseName || 'entreprise').replace(/[^a-zA-Z0-9]/g, '_');
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0,10).replace(/-/g,'');
+  const timeStr = `${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
+  const filename = `Facture_${clean}_${dateStr}_${timeStr}.pdf`;
+  await downloadInvoiceById(invoiceId, filename);
+}
+
+async function downloadInvoiceById(invoiceId, filename) {
   try {
     const res = await fetch(`/api/invoices/${invoiceId}/pdf`, { headers: { 'Authorization': 'Bearer ' + token } });
     if (!res.ok) { toast('PDF non disponible', 'error'); return; }
     const blob = await res.blob();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `facture-${invoiceId.slice(0,8)}.pdf`;
+    a.download = filename || `facture-${invoiceId.slice(0,8)}.pdf`;
     a.click();
   } catch (e) { toast(e.message, 'error'); }
 }
@@ -984,8 +1209,16 @@ async function openProfileModal() {
     _profilePhotoData = r.photo || null;
 
     const img = el('prof-img');
-    if (r.photo) { img.src = r.photo; img.classList.remove('hidden'); el('prof-clear-btn').classList.remove('hidden'); }
-    else         { img.classList.add('hidden'); el('prof-clear-btn').classList.add('hidden'); }
+    const ini = el('prof-initials');
+    if (r.photo) {
+      img.src = r.photo; img.classList.remove('hidden');
+      if (ini) ini.classList.add('hidden');
+      el('prof-clear-btn').classList.remove('hidden');
+    } else {
+      img.classList.add('hidden');
+      if (ini) { ini.textContent = (r.restaurantName || '🍴').charAt(0).toUpperCase(); ini.classList.remove('hidden'); }
+      el('prof-clear-btn').classList.add('hidden');
+    }
 
     // Payment info
     const container = el('prof-pay-entries');
@@ -1010,6 +1243,8 @@ function onPhotoFile(event) {
     _profilePhotoData = e.target.result;
     el('prof-img').src = _profilePhotoData;
     el('prof-img').classList.remove('hidden');
+    const ini = el('prof-initials');
+    if (ini) ini.classList.add('hidden');
     el('prof-clear-btn').classList.remove('hidden');
   };
   reader.readAsDataURL(file);
@@ -1018,6 +1253,8 @@ function onPhotoFile(event) {
 function clearProfilePhoto() {
   _profilePhotoData = '';
   el('prof-img').classList.add('hidden');
+  const ini = el('prof-initials');
+  if (ini) ini.classList.remove('hidden');
   el('prof-clear-btn').classList.add('hidden');
 }
 
@@ -1143,6 +1380,18 @@ async function launchOrder(restaurantId) {
 let _restoTabMode = 'all';
 
 async function loadEntRestaurants() {
+  // Add search box if not present
+  const searchBox = el('rst-search-box');
+  if (!searchBox) {
+    const header = el('pane-ent-restaurants')?.querySelector('.pane-header');
+    if (header) {
+      const searchDiv = document.createElement('div');
+      searchDiv.id = 'rst-search-box';
+      searchDiv.style.cssText = 'padding:8px 0;';
+      searchDiv.innerHTML = `<input id="rst-search-input" type="text" placeholder="Rechercher un restaurant..." style="width:100%;max-width:400px" oninput="renderEntRestaurants(_restoTabMode, this.value.toLowerCase())"/>`;
+      header.after(searchDiv);
+    }
+  }
   switchRestoTab(_restoTabMode);
 }
 
@@ -1150,6 +1399,10 @@ async function switchRestoTab(mode) {
   _restoTabMode = mode;
   el('seg-all').classList.toggle('active', mode === 'all');
   el('seg-aff').classList.toggle('active', mode === 'affiliated');
+  await renderEntRestaurants(mode, el('rst-search-input')?.value?.toLowerCase() || '');
+}
+
+async function renderEntRestaurants(mode, searchQuery) {
   try {
     const [all, affiliated, mySubs] = await Promise.all([
       api('GET', '/api/restaurants'),
@@ -1157,9 +1410,19 @@ async function switchRestoTab(mode) {
       api('GET', '/api/subscriptions'),
     ]);
     const affIds = new Set(affiliated.map(r => r.id));
-    const list   = mode === 'all' ? all : affiliated;
+    const affMap = {};
+    affiliated.forEach(r => { affMap[r.id] = r; });
 
-    // Indexer les abonnements par restaurantId
+    // Sort: affiliated first (by affiliation date), then others
+    const affRests = affiliated.sort((a, b) => new Date(a.affiliatedAt) - new Date(b.affiliatedAt));
+    const nonAffRests = all.filter(r => !affIds.has(r.id));
+    let list = mode === 'affiliated' ? affRests : [...affRests, ...nonAffRests];
+
+    // Apply search filter
+    if (searchQuery) {
+      list = list.filter(r => r.restaurantName.toLowerCase().includes(searchQuery));
+    }
+
     const subByResto = {};
     mySubs.forEach(s => { subByResto[s.restaurantId] = s; });
 
@@ -1169,31 +1432,91 @@ async function switchRestoTab(mode) {
     el('ent-restaurants-list').innerHTML = list.length
       ? list.map(r => {
           const sub = subByResto[r.id];
+          const aff = affIds.has(r.id);
+          const fullR = affMap[r.id] || r;
           return `
           <div class="resto-card">
             ${r.photo ? `<img src="${esc(r.photo)}" class="resto-thumb"/>` : '<div class="resto-thumb-ph">🍴</div>'}
             <div class="resto-info">
-              <h4>${esc(r.restaurantName)}</h4>
+              <h4 class="rst-name-link" style="cursor:pointer;color:var(--orange)" onclick="viewRestaurantMenu('${r.id}','${esc(r.restaurantName)}')">${esc(r.restaurantName)}</h4>
               ${r.specialty?.length ? `<p>${esc(Array.isArray(r.specialty)?r.specialty.join(', '):r.specialty)}</p>` : ''}
               ${r.address   ? `<p>📍 ${esc(r.address)}</p>` : ''}
               ${r.phone     ? `<p>📞 ${esc(r.phone)}</p>` : ''}
-              ${affIds.has(r.id) && r.dailyMenu
-                ? `<p class="daily-preview">Menu du jour : ${[...r.dailyMenu.foods, ...r.dailyMenu.drinks].map(i => esc(i.name)).join(', ') || 'Non défini'}</p>`
+              ${aff && fullR.dailyMenu
+                ? `<p class="daily-preview">Menu du jour : ${[...(fullR.dailyMenu.foods||[]),...(fullR.dailyMenu.drinks||[])].map(i=>esc(i.name)).join(', ') || 'Non défini'}</p>`
                 : ''}
               ${sub ? `<p><span class="badge ${subStatusClass[sub.status]||''}">${subStatusLabel[sub.status]||sub.status}</span> <em>(${sub.frequency})</em></p>` : ''}
+              ${aff ? '<span class="badge success" style="margin-top:4px">✓ Affilié</span>' : ''}
             </div>
             <div class="resto-actions">
-              ${affIds.has(r.id)
-                ? `<span class="badge success">Affilié</span>
-                   <button class="btn ghost sm" onclick="disaffiliate('${r.id}')">Se désaffilier</button>
+              ${aff
+                ? `<button class="btn ghost sm" onclick="disaffiliate('${r.id}')">Se désaffilier</button>
                    ${!sub || sub.status === 'declined'
                      ? `<button class="btn primary sm" onclick="openSubModal('${r.id}','${esc(r.restaurantName)}')">📅 Abonnement</button>`
                      : ''}`
                 : `<button class="btn primary sm" onclick="affiliate('${r.id}')">+ S'affilier</button>`}
+              <button class="btn ghost sm" onclick="viewRestaurantMenu('${r.id}','${esc(r.restaurantName)}')">🍽️ Voir menu</button>
             </div>
           </div>`;
         }).join('')
-      : '<p class="empty">Aucun restaurant.</p>';
+      : '<p class="empty">Aucun restaurant' + (searchQuery ? ' trouvé.' : '.') + '</p>';
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function viewRestaurantMenu(restaurantId, restaurantName) {
+  try {
+    const [menuData, affiliatedList] = await Promise.all([
+      api('GET', `/api/restaurants/${restaurantId}/menu`).catch(() => ({ items: [] })),
+      api('GET', '/api/enterprise/restaurants'),
+    ]);
+    const isAffiliated = affiliatedList.some(r => r.id === restaurantId);
+    // Find daily menu
+    let dailyAvailable = new Set();
+    if (isAffiliated) {
+      const aff = affiliatedList.find(r => r.id === restaurantId);
+      if (aff && aff.dailyMenu) {
+        [...(aff.dailyMenu.foods||[]), ...(aff.dailyMenu.drinks||[])].forEach(i => dailyAvailable.add(i.id));
+      }
+    }
+
+    const items = menuData.items || [];
+    const foods = items.filter(i => i.category === 'food');
+    const drinks = items.filter(i => i.category === 'drink');
+
+    const html = `
+      <h3>🍴 Menu de ${esc(restaurantName)}</h3>
+      ${foods.length ? `<h4 style="margin-top:12px">🍽️ Nourritures (${foods.length})</h4>
+        <table class="choice-table"><thead><tr><th>Plat</th><th>Prix</th>${isAffiliated?'<th>Dispo aujourd\'hui</th>':''}</tr></thead>
+        <tbody>${foods.map(f => `<tr>
+          <td>${esc(f.name)}${f.description?`<br><small style="color:var(--gray)">${esc(f.description)}</small>`:''}</td>
+          <td>${fmtPrice(f.price)}</td>
+          ${isAffiliated?`<td>${dailyAvailable.has(f.id)?'<span class="badge success">✓ Disponible</span>':'<span class="badge">Non disponible</span>'}</td>`:''}
+        </tr>`).join('')}</tbody></table>` : '<p class="empty">Aucun plat.</p>'}
+      ${drinks.length ? `<h4 style="margin-top:12px">🥤 Boissons/Jus (${drinks.length})</h4>
+        <table class="choice-table"><thead><tr><th>Boisson</th><th>Prix</th>${isAffiliated?'<th>Dispo aujourd\'hui</th>':''}</tr></thead>
+        <tbody>${drinks.map(d => `<tr>
+          <td>${esc(d.name)}${d.description?`<br><small style="color:var(--gray)">${esc(d.description)}</small>`:''}</td>
+          <td>${fmtPrice(d.price)}</td>
+          ${isAffiliated?`<td>${dailyAvailable.has(d.id)?'<span class="badge success">✓ Disponible</span>':'<span class="badge">Non disponible</span>'}</td>`:''}
+        </tr>`).join('')}</tbody></table>` : ''}
+      ${!foods.length && !drinks.length ? '<p class="empty">Ce restaurant n\'a pas encore publié de menu.</p>' : ''}
+      ${!isAffiliated ? '<p class="hint" style="margin-top:8px">Affiliez-vous à ce restaurant pour commander.</p>' : ''}
+    `;
+
+    // Show in a temporary overlay modal
+    let overlay = el('modal-resto-menu');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'modal-resto-menu';
+      overlay.className = 'overlay';
+      overlay.innerHTML = `<div class="dialog wide" style="max-height:85vh;overflow-y:auto">
+        <div id="modal-resto-menu-body"></div>
+        <div class="dialog-btns"><button class="btn ghost" onclick="closeModal('modal-resto-menu')">Fermer</button></div>
+      </div>`;
+      document.body.appendChild(overlay);
+    }
+    el('modal-resto-menu-body').innerHTML = html;
+    openModal('modal-resto-menu');
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -1230,100 +1553,127 @@ async function submitSub() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ENTERPRISE — Menus des restaurants affiliés
-// ═══════════════════════════════════════════════════════════════════════════
-
-async function loadEntMenus() {
-  try {
-    const restaurants = await api('GET', '/api/enterprise/restaurants');
-    if (!restaurants.length) {
-      el('ent-menus-content').innerHTML = '<p class="empty">Aucun restaurant affilié. Affiliez-vous dans l\'onglet Restaurants.</p>';
-      return;
-    }
-    el('ent-menus-content').innerHTML = restaurants.map(r => {
-      const foods  = (r.menu || []).filter(i => i.category === 'food');
-      const drinks = (r.menu || []).filter(i => i.category === 'drink');
-      const dayFoods  = r.dailyMenu?.foods  || [];
-      const dayDrinks = r.dailyMenu?.drinks || [];
-      return `<div class="menu-resto-card">
-        <div class="pane-header" style="margin-bottom:8px">
-          <h4>🍴 ${esc(r.restaurantName)}</h4>
-          ${r.specialty ? `<span class="badge">${esc(r.specialty)}</span>` : ''}
-        </div>
-        <p class="hint" style="margin-bottom:8px">Menu du jour : ${dayFoods.length + dayDrinks.length ? [...dayFoods,...dayDrinks].map(i=>esc(i.name)).join(', ') : 'Non défini'}</p>
-        ${foods.length ? `<div class="menu-section"><h5>🍽️ Plats complets (${foods.length})</h5>
-          <table class="choice-table" style="min-width:0">
-            <thead><tr><th>Nom</th><th>Prix</th><th>Dispo aujourd'hui</th></tr></thead>
-            <tbody>${foods.map(f => {
-              const inDay = (r.dailyMenu?.foods||[]).some(d=>d.id===f.id);
-              return `<tr><td>${esc(f.name)}</td><td>${fmtPrice(f.price)}</td>
-                <td>${inDay ? '<span class="badge success">✓ Oui</span>' : '<span class="badge">Non</span>'}</td></tr>`;
-            }).join('')}</tbody>
-          </table></div>` : ''}
-        ${drinks.length ? `<div class="menu-section" style="margin-top:10px"><h5>🥤 Boissons (${drinks.length})</h5>
-          <table class="choice-table" style="min-width:0">
-            <thead><tr><th>Nom</th><th>Prix</th><th>Dispo aujourd'hui</th></tr></thead>
-            <tbody>${drinks.map(d => {
-              const inDay = (r.dailyMenu?.drinks||[]).some(x=>x.id===d.id);
-              return `<tr><td>${esc(d.name)}</td><td>${fmtPrice(d.price)}</td>
-                <td>${inDay ? '<span class="badge success">✓ Oui</span>' : '<span class="badge">Non</span>'}</td></tr>`;
-            }).join('')}</tbody>
-          </table></div>` : ''}
-        ${!foods.length && !drinks.length ? '<p class="empty">Ce restaurant n\'a pas encore publié de menu.</p>' : ''}
-      </div>`;
-    }).join('');
-  } catch (e) { toast(e.message, 'error'); }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // ENTERPRISE — Employés, Commandes, Stats
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function loadEntEmployees() {
   try {
     const employees = await api('GET', '/api/enterprise/employees');
-    el('ent-emp-list').innerHTML = employees.length
-      ? employees.map(e => {
-          _empCache[e.id] = e;
-          return `<div class="emp-row">
-            <span>${e.gender === 'female' ? '👩' : '👨'} ${esc(e.fullName)}</span>
-            <div>
-              <button class="btn ghost sm" onclick="openEmpModal('${e.id}')">✏️</button>
-              <button class="btn danger sm" onclick="deleteEmployee('${e.id}')">🗑️</button>
-            </div>
-          </div>`;
-        }).join('')
-      : '<p class="empty">Aucun employé. Ajoutez-en avec le bouton +</p>';
+    if (!employees.length) {
+      el('ent-emp-list').innerHTML = `<div class="cmd-empty-state">
+        <div class="cmd-empty-icon">👥</div>
+        <p class="cmd-empty-title">Aucun employé enregistré</p>
+        <p class="cmd-empty-sub">Cliquez sur « + Ajouter » pour créer le premier compte employé.</p>
+      </div>`;
+      return;
+    }
+    el('ent-emp-list').innerHTML = `<div class="emp-grid">` +
+      employees.map(e => {
+        _empCache[e.id] = e;
+        const initial = (e.firstName || e.fullName || '?').charAt(0).toUpperCase();
+        const genderColor = e.gender === 'female' ? '#EC4899' : '#0EA5E9';
+        return `<div class="emp-card">
+          <div class="emp-card-avatar" style="background:${genderColor}">${initial}</div>
+          <div class="emp-card-body">
+            <span class="emp-card-name">${e.gender === 'female' ? '👩' : '👨'} ${esc(e.fullName || (e.firstName + ' ' + e.lastName))}</span>
+            ${e.employeeId ? `<span class="emp-card-id">🔑 ${esc(e.employeeId)}</span>` : ''}
+            ${e.whatsapp   ? `<span class="emp-card-wa">📱 ${esc(e.whatsapp)}</span>` : ''}
+          </div>
+          <div class="emp-card-actions">
+            <button class="btn ghost sm" onclick="openEmpModal('${e.id}')">✏️</button>
+            <button class="btn danger sm" onclick="deleteEmployee('${e.id}')">🗑️</button>
+          </div>
+        </div>`;
+      }).join('') + `</div>`;
   } catch (e) { toast(e.message, 'error'); }
+}
+
+function autoFillEmpId() {
+  const idField = el('emp-employee-id');
+  if (idField.dataset.manual) return;
+  const firstName = el('emp-firstname').value.trim();
+  const lastName  = el('emp-lastname').value.trim();
+  if (!firstName) return;
+  // Nettoyer les accents et caractères spéciaux
+  const clean = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zA-Z0-9]/g,'');
+  const fn = clean(firstName);
+  const ln = clean(lastName);
+  // Style Gmail : PrenomNom, ou Prenom.Nom, ou prenom_nom
+  const capitalize = s => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+  let suggestion = ln ? capitalize(fn) + capitalize(ln) : capitalize(fn);
+  idField.value = suggestion;
+  const hint = el('emp-id-hint');
+  if (hint) hint.classList.remove('hidden');
 }
 
 function openEmpModal(empIdOrNull) {
   const emp = empIdOrNull ? _empCache[empIdOrNull] : null;
   el('modal-emp-title').textContent = emp ? 'Modifier l\'employé' : 'Nouvel employé';
-  el('emp-id').value     = emp?.id || '';
-  el('emp-name').value   = emp?.fullName || '';
-  el('emp-gender').value = emp?.gender || '';
-  el('emp-pwd').value    = '';
-  el('emp-pwd-lbl').textContent = emp ? 'Nouveau mot de passe (laisser vide = inchangé)' : 'Mot de passe *';
+  el('emp-id').value          = emp?.id || '';
+  el('emp-firstname').value   = emp ? (emp.firstName || emp.fullName?.split(' ')[0] || '') : '';
+  el('emp-lastname').value    = emp ? (emp.lastName  || emp.fullName?.split(' ').slice(1).join(' ') || '') : '';
+  const idField = el('emp-employee-id');
+  idField.value = emp?.employeeId || '';
+  delete idField.dataset.manual;
+  const hint = el('emp-id-hint');
+  if (hint) hint.classList.add('hidden');
+  // Auto-suggérer si c'est un nouvel employé
+  if (!emp) {
+    const firstName = el('emp-firstname').value.trim();
+    if (firstName) autoFillEmpId();
+  }
+  el('emp-whatsapp').value    = emp?.whatsapp || '';
+  el('emp-gender').value      = emp?.gender || '';
+  el('emp-pwd').value         = '';
+  const saveBtn = document.querySelector('#modal-emp .btn.primary');
+  if (saveBtn) saveBtn.textContent = emp ? 'Enregistrer' : 'Créer le compte';
   openModal('modal-emp');
 }
 
 async function saveEmployee() {
-  const id     = el('emp-id').value;
-  const name   = el('emp-name').value.trim();
-  const gender = el('emp-gender').value;
-  const pwd    = el('emp-pwd').value;
-  if (!name || !gender) { toast('Nom et genre requis', 'error'); return; }
-  if (!id && !pwd) { toast('Mot de passe requis pour un nouvel employé', 'error'); return; }
-  const body = { fullName: name, gender };
+  const id         = el('emp-id').value;
+  const firstName  = el('emp-firstname').value.trim();
+  const lastName   = el('emp-lastname').value.trim();
+  const employeeId = el('emp-employee-id').value.trim().replace(/\s+/g, '');
+  const whatsapp   = el('emp-whatsapp').value.trim().replace(/\s+/g, '');
+  const gender     = el('emp-gender').value;
+  const pwd        = el('emp-pwd').value;
+
+  if (!firstName || !lastName) { toast('Prénom et nom requis', 'error'); return; }
+  if (!gender) { toast('Sexe requis', 'error'); return; }
+  if (!/^[A-Za-z][A-Za-z0-9._-]{2,29}$/.test(employeeId)) { toast('ID invalide — commence par une lettre, 3 à 30 caractères (lettres, chiffres, points, tirets)', 'error'); return; }
+  if (pwd && pwd.length < 6) { toast('Le mot de passe doit contenir au moins 6 caractères', 'error'); return; }
+
+  const body = { firstName, lastName, gender, employeeId };
+  if (whatsapp) body.whatsapp = whatsapp;
   if (pwd) body.password = pwd;
+
   try {
-    if (id) await api('PUT', `/api/enterprise/employees/${id}`, body);
-    else    await api('POST', '/api/enterprise/employees', body);
-    closeModal('modal-emp');
-    toast('Employé enregistré', 'success');
+    if (id) {
+      await api('PUT', `/api/enterprise/employees/${id}`, body);
+      closeModal('modal-emp');
+      toast('Employé modifié', 'success');
+    } else {
+      const created = await api('POST', '/api/enterprise/employees', body);
+      closeModal('modal-emp');
+      el('cred-name').textContent  = created.fullName || `${firstName} ${lastName}`;
+      el('cred-id').textContent    = created.employeeId;
+      el('cred-pwd').textContent   = created.plainPassword || '(mot de passe personnalisé)';
+      el('cred-wa-status').textContent = whatsapp
+        ? '📱 Les identifiants ont également été envoyés par WhatsApp.'
+        : 'ℹ️ Aucun numéro WhatsApp — transmettez les identifiants manuellement.';
+      openModal('modal-credentials');
+    }
     loadEntEmployees();
   } catch (e) { toast(e.message, 'error'); }
+}
+
+function copyCredentials() {
+  const name = el('cred-name').textContent;
+  const id   = el('cred-id').textContent;
+  const pwd  = el('cred-pwd').textContent;
+  const text = `Compte LunchApp\nNom : ${name}\nIdentifiant : ${id}\nMot de passe : ${pwd}`;
+  navigator.clipboard.writeText(text).then(() => toast('Identifiants copiés', 'success')).catch(() => toast('Copie impossible', 'error'));
 }
 
 async function deleteEmployee(id) {
@@ -1334,39 +1684,117 @@ async function deleteEmployee(id) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
+let _entAllOrders = [];
+
 async function loadEntOrders() {
   try {
-    const orders = await api('GET', '/api/orders');
-    el('ent-orders-list').innerHTML = orders.length
-      ? orders.map(o => `
-          <div class="order-card">
-            <div><strong>${esc(o.restaurantName)}</strong> — ${fmtDateTime(o.createdAt)}
-              <span class="badge ${o.status}">${o.status}</span>
-            </div>
-            <div>${fmtPrice(o.totalAmount)} · ${o.items?.length || 0} repas</div>
-          </div>`).join('')
-      : '<p class="empty">Aucune commande.</p>';
+    _entAllOrders = await api('GET', '/api/orders');
+    renderEntOrdersFiltered();
   } catch (e) { toast(e.message, 'error'); }
 }
 
+function renderEntOrdersFiltered() {
+  const fromVal = el('ent-ord-from')?.value;
+  const toVal   = el('ent-ord-to')?.value;
+  let orders = _entAllOrders;
+  if (fromVal) orders = orders.filter(o => o.date >= fromVal);
+  if (toVal)   orders = orders.filter(o => o.date <= toVal);
+
+  const statusLabel = { pending:'En attente', confirmed:'Confirmée', preparing:'En préparation', delivered:'Livrée', cancelled:'Annulée' };
+
+  el('ent-orders-list').innerHTML = orders.length
+    ? orders.map(o => {
+        const initial = (o.restaurantName || '?').charAt(0).toUpperCase();
+        return `<div class="ent-order-line">
+          <div class="eol-avatar">${initial}</div>
+          <div class="eol-body">
+            <div class="eol-top">
+              <span class="eol-name">${esc(o.restaurantName)}</span>
+              <span class="badge ${o.status}">${statusLabel[o.status] || o.status}</span>
+            </div>
+            <div class="eol-meta">
+              <span>📅 ${fmtDateTime(o.createdAt)}</span>
+              <span>·</span>
+              <span>🍽️ ${o.items?.length || 0} repas</span>
+              <span>·</span>
+              <span class="eol-price">${fmtPrice(o.totalAmount)}</span>
+            </div>
+          </div>
+        </div>`;
+      }).join('')
+    : `<div class="cmd-empty-state">
+         <div class="cmd-empty-icon">📦</div>
+         <p class="cmd-empty-title">Aucune commande${fromVal || toVal ? ' pour cette période' : ''}</p>
+         <p class="cmd-empty-sub">Vos commandes passées auprès des restaurants apparaîtront ici.</p>
+       </div>`;
+}
+
+function clearEntOrderFilter() {
+  const f = el('ent-ord-from'), t = el('ent-ord-to');
+  if (f) f.value = ''; if (t) t.value = '';
+  renderEntOrdersFiltered();
+}
+
+let _entAllInvoices = [];
+
 async function loadEntInvoices() {
   try {
-    const invoices = await api('GET', '/api/invoices');
-    el('ent-invoices-list').innerHTML = invoices.length
-      ? invoices.map(inv => `
-          <div class="order-card invoice-card">
-            <div>
-              <strong>${esc(inv.restaurantName)}</strong> — ${fmtDateTime(inv.createdAt)}
-              <span class="badge ${inv.status}">${inv.status === 'sent' ? '📨 Reçue' : inv.status === 'confirmed' ? '✅ Confirmée' : inv.status}</span>
-            </div>
-            <div>${inv.number} · ${fmtPrice(inv.totalAmount)} · ${inv.items?.length||0} article(s)</div>
-            <div class="order-btns">
-              <button class="btn ghost sm" onclick="downloadInvoice('${inv.id}')">⬇ PDF</button>
-              ${inv.status === 'sent' ? `<button class="btn primary sm" onclick="confirmInvoice('${inv.id}')">✅ Confirmer réception</button>` : ''}
-            </div>
-          </div>`).join('')
-      : '<p class="empty">Aucune facture.</p>';
+    _entAllInvoices = await api('GET', '/api/invoices');
+    renderEntInvoicesFiltered();
   } catch (e) { toast(e.message, 'error'); }
+}
+
+function renderEntInvoicesFiltered() {
+  const search  = el('ent-inv-search')?.value?.toLowerCase() || '';
+  const fromVal = el('ent-inv-from')?.value;
+  const toVal   = el('ent-inv-to')?.value;
+  let invoices = _entAllInvoices;
+  if (search) invoices = invoices.filter(i =>
+    i.number?.toLowerCase().includes(search) ||
+    i.restaurantName?.toLowerCase().includes(search)
+  );
+  if (fromVal) invoices = invoices.filter(i => (i.date || i.createdAt?.slice(0,10)) >= fromVal);
+  if (toVal)   invoices = invoices.filter(i => (i.date || i.createdAt?.slice(0,10)) <= toVal);
+
+  el('ent-invoices-list').innerHTML = invoices.length
+    ? invoices.map(inv => {
+        const isConfirmed = inv.status === 'confirmed';
+        const initial = (inv.restaurantName || '?').charAt(0).toUpperCase();
+        return `<div class="inv-card${isConfirmed ? ' inv-card--ok' : ''}">
+          <div class="inv-card-top">
+            <div class="inv-card-left">
+              <span class="inv-avatar">${initial}</span>
+              <div class="inv-meta">
+                <span class="inv-resto">${esc(inv.restaurantName)}</span>
+                <span class="inv-date">📅 ${fmtDateTime(inv.createdAt)}</span>
+              </div>
+            </div>
+            <span class="badge ${inv.status}">${isConfirmed ? '✅ Confirmée' : '📨 Reçue'}</span>
+          </div>
+          <div class="inv-card-body">
+            <div class="inv-num">🔖 ${esc(inv.number || '—')}</div>
+            <div class="inv-details">
+              <span class="inv-amount">${fmtPrice(inv.totalAmount)}</span>
+              <span class="inv-items">${inv.items?.length || 0} article(s)</span>
+            </div>
+          </div>
+          <div class="inv-card-actions">
+            <button class="btn ghost sm" onclick="downloadInvoice('${inv.id}','${esc(inv.restaurantName)}')">⬇ PDF</button>
+            ${!isConfirmed ? `<button class="btn primary sm" onclick="confirmInvoice('${inv.id}')">✅ Confirmer réception</button>` : ''}
+          </div>
+        </div>`;
+      }).join('')
+    : `<div class="cmd-empty-state">
+         <div class="cmd-empty-icon">🧾</div>
+         <p class="cmd-empty-title">Aucune facture${search || fromVal || toVal ? ' pour ces critères' : ''}</p>
+         <p class="cmd-empty-sub">Les factures envoyées par les restaurants apparaîtront ici.</p>
+       </div>`;
+}
+
+function clearEntInvFilter() {
+  const s = el('ent-inv-search'), f = el('ent-inv-from'), t = el('ent-inv-to');
+  if (s) s.value = ''; if (f) f.value = ''; if (t) t.value = '';
+  renderEntInvoicesFiltered();
 }
 
 async function confirmInvoice(invoiceId) {
@@ -1383,17 +1811,52 @@ async function loadEntStats() {
     const s = await api('GET', `/api/stats/enterprise?frequency=${freq}`);
     const topFoods  = Object.entries(s.foodCounts  || {}).sort((a,b)=>b[1]-a[1]).slice(0,5);
     const topDrinks = Object.entries(s.drinkCounts || {}).sort((a,b)=>b[1]-a[1]).slice(0,5);
+    const empStats  = (s.employeeStats || []).sort((a,b) => b.choicesCount - a.choicesCount);
+    const maxEmp    = empStats[0]?.choicesCount || 1;
+
+    function rankList(items, unit='') {
+      const max = items[0]?.[1] || 1;
+      return items.map(([n,c], i) => `
+        <div class="rank-row">
+          <span class="rank-pos">${i+1}</span>
+          <div class="rank-bar-wrap">
+            <span class="rank-name">${esc(n)}</span>
+            <div class="rank-bar"><div class="rank-fill" style="width:${Math.round(c/max*100)}%"></div></div>
+          </div>
+          <span class="rank-count">${c}${unit}</span>
+        </div>`).join('');
+    }
+
     el('ent-stats-content').innerHTML = `
-      <div class="stats-grid">
-        <div class="stat-card"><div class="stat-num">${s.totalChoices}</div><div class="stat-lbl">Choix</div></div>
-        <div class="stat-card"><div class="stat-num">${fmtPrice(s.totalBudget)}</div><div class="stat-lbl">Budget dépensé</div></div>
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-icon">🍽️</div>
+          <div class="kpi-body"><div class="kpi-num">${s.totalChoices}</div><div class="kpi-lbl">Repas commandés</div></div>
+        </div>
+        <div class="kpi-card green">
+          <div class="kpi-icon">💰</div>
+          <div class="kpi-body"><div class="kpi-num">${fmtPrice(s.totalBudget)}</div><div class="kpi-lbl">Budget dépensé</div></div>
+        </div>
       </div>
-      ${topFoods.length ? `<h4>Plats populaires</h4><ul class="item-list">${topFoods.map(([n,c])=>`<li>${esc(n)} <span class="badge">${c}</span></li>`).join('')}</ul>` : ''}
-      ${topDrinks.length ? `<h4>Boissons populaires</h4><ul class="item-list">${topDrinks.map(([n,c])=>`<li>${esc(n)} <span class="badge">${c}</span></li>`).join('')}</ul>` : ''}
-      ${s.employeeStats?.length ? `<h4>Consommation par employé</h4><table class="choice-table">
-        <thead><tr><th>Nom</th><th>Choix</th></tr></thead>
-        <tbody>${s.employeeStats.map(e=>`<tr><td>${esc(e.fullName)}</td><td>${e.choicesCount}</td></tr>`).join('')}</tbody>
-      </table>` : ''}`;
+      ${topFoods.length ? `
+        <div class="stats-section-title">🏆 Plats populaires</div>
+        <div class="rank-list">${rankList(topFoods, 'x')}</div>` : ''}
+      ${topDrinks.length ? `
+        <div class="stats-section-title">🥤 Boissons populaires</div>
+        <div class="rank-list">${rankList(topDrinks, 'x')}</div>` : ''}
+      ${empStats.length ? `
+        <div class="stats-section-title">👥 Consommation par employé</div>
+        <div class="emp-stat-list">
+          ${empStats.map((e,i) => `
+            <div class="emp-stat-row">
+              <span class="emp-stat-rank">${i+1}</span>
+              <div class="emp-stat-bar-wrap">
+                <span class="emp-stat-name">${esc(e.fullName)}</span>
+                <div class="rank-bar"><div class="rank-fill rank-fill--blue" style="width:${Math.round(e.choicesCount/maxEmp*100)}%"></div></div>
+              </div>
+              <span class="emp-stat-count">${e.choicesCount}</span>
+            </div>`).join('')}
+        </div>` : ''}`;
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -1594,20 +2057,28 @@ async function loadEmpMenu() {
     const elapsed = myChoice ? (Date.now() - new Date(myChoice.createdAt).getTime()) / 60000 : Infinity;
     const locked  = myChoice && elapsed >= 5;
 
-    const menuHtml = locked ? '' : menus.map(m => `
-      <div class="menu-resto-card">
-        <h4>🍴 ${esc(m.restaurant.restaurantName)}</h4>
-        ${m.foods.length ? `<div class="menu-section"><h5>🍽️ Plats</h5>
-          ${m.foods.map(f => `<div class="menu-item${_pendingFoodId === f.id ? ' selected' : ''}" data-cat="food"
-            onclick="selectItem(this,'food','${f.id}','${m.restaurant.id}')">
-            <span>${esc(f.name)}</span><span class="item-price">${fmtPrice(f.price)}</span>
-          </div>`).join('')}</div>` : ''}
-        ${m.drinks.length ? `<div class="menu-section"><h5>🥤 Boissons</h5>
-          ${m.drinks.map(d => `<div class="menu-item${_pendingDrinkId === d.id ? ' selected' : ''}" data-cat="drink"
-            onclick="selectItem(this,'drink','${d.id}','${m.restaurant.id}')">
-            <span>${esc(d.name)}</span><span class="item-price">${fmtPrice(d.price)}</span>
-          </div>`).join('')}</div>` : ''}
-      </div>`).join('');
+    const menuHtml = locked ? '' : menus.map((m, idx) => {
+      const isSelected = _pendingRestaurantId === m.restaurant.id;
+      return `
+      <div class="menu-resto-card accordion-card">
+        <div class="accordion-header${isSelected ? ' selected-resto' : ''}" onclick="toggleAccordion(this)">
+          <span>🍴 ${esc(m.restaurant.restaurantName)}</span>
+          <span class="toggle-arrow">${isSelected ? '▲' : '▼'}</span>
+        </div>
+        <div class="accordion-body${isSelected ? '' : ' hidden'}">
+          ${m.foods.length ? `<div class="menu-section"><h5>🍽️ Plats</h5>
+            ${m.foods.map(f => `<div class="menu-item${_pendingFoodId === f.id ? ' selected' : ''}" data-cat="food"
+              onclick="selectItem(this,'food','${f.id}','${m.restaurant.id}')">
+              <span>${esc(f.name)}</span><span class="item-price">${fmtPrice(f.price)}</span>
+            </div>`).join('')}</div>` : ''}
+          ${m.drinks.length ? `<div class="menu-section"><h5>🥤 Boissons</h5>
+            ${m.drinks.map(d => `<div class="menu-item${_pendingDrinkId === d.id ? ' selected' : ''}" data-cat="drink"
+              onclick="selectItem(this,'drink','${d.id}','${m.restaurant.id}')">
+              <span>${esc(d.name)}</span><span class="item-price">${fmtPrice(d.price)}</span>
+            </div>`).join('')}</div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
 
     el('emp-menu-content').innerHTML = `<div id="emp-choice-summary"></div>` + menuHtml;
     renderChoiceSummary();
@@ -1775,6 +2246,61 @@ async function clearHistory() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// EMPLOYEE — Profil
+// ═══════════════════════════════════════════════════════════════════════════
+
+function loadEmpProfile() {
+  const initial = (me.firstName || me.fullName || '?').charAt(0).toUpperCase();
+  const genderColor = me.gender === 'female' ? '#EC4899' : '#0EA5E9';
+  el('emp-profile-content').innerHTML = `
+    <div class="emp-profile-card">
+      <div class="epc-avatar" style="background:${genderColor}">${initial}</div>
+      <div class="epc-info">
+        <div class="epc-name">${esc(me.fullName || (me.firstName + ' ' + me.lastName) || '—')}</div>
+        <div class="epc-id">🔑 ${esc(me.employeeId || '—')}</div>
+        <div class="epc-company">🏢 ${esc(me.enterpriseName || '—')}</div>
+      </div>
+    </div>
+    <div class="epc-section-title">Changer mon mot de passe</div>
+    <div class="epc-pwd-form">
+      <div class="field-label">Mot de passe actuel</div>
+      <div class="pwd-row">
+        <input id="epc-cur-pwd" type="password" placeholder="Mot de passe actuel" autocomplete="current-password"/>
+        <button type="button" class="eye-btn" onclick="toggleEye('epc-cur-pwd',this)">👁</button>
+      </div>
+      <div class="field-label">Nouveau mot de passe</div>
+      <div class="pwd-row">
+        <input id="epc-new-pwd" type="password" placeholder="Au moins 6 caractères" autocomplete="new-password" oninput="pwdMeter(this,'epc-meter')"/>
+        <button type="button" class="eye-btn" onclick="toggleEye('epc-new-pwd',this)">👁</button>
+      </div>
+      <div id="epc-meter" class="pwd-meter"></div>
+      <div class="field-label">Confirmer le nouveau mot de passe</div>
+      <div class="pwd-row">
+        <input id="epc-confirm-pwd" type="password" placeholder="Répéter le mot de passe" autocomplete="new-password"/>
+        <button type="button" class="eye-btn" onclick="toggleEye('epc-confirm-pwd',this)">👁</button>
+      </div>
+      <button class="btn primary mt" onclick="changeEmpPassword()">Enregistrer le nouveau mot de passe</button>
+    </div>`;
+}
+
+async function changeEmpPassword() {
+  const cur     = el('epc-cur-pwd').value;
+  const newPwd  = el('epc-new-pwd').value;
+  const confirm = el('epc-confirm-pwd').value;
+  if (!cur || !newPwd) { toast('Remplissez tous les champs', 'error'); return; }
+  if (newPwd.length < 6) { toast('Le nouveau mot de passe doit contenir au moins 6 caractères', 'error'); return; }
+  if (newPwd !== confirm) { toast('Les mots de passe ne correspondent pas', 'error'); return; }
+  try {
+    await api('PUT', '/api/employee/me', { currentPassword: cur, newPassword: newPwd });
+    toast('Mot de passe modifié avec succès', 'success');
+    el('epc-cur-pwd').value = '';
+    el('epc-new-pwd').value = '';
+    el('epc-confirm-pwd').value = '';
+    el('epc-meter').innerHTML = '';
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // ADMIN
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1784,119 +2310,188 @@ async function loadAdminStats() {
     b.classList.toggle('active', ['ov','ent','rst','emp','del'][i] === _adminTab);
   });
   const freq = el('adm-freq')?.value || 'monthly';
+  const content = el('admin-content');
+  content.innerHTML = '<div class="adm-loading">⏳ Chargement…</div>';
   try {
     switch (_adminTab) {
+
       case 'ov': {
         const s = await api('GET', `/api/admin/stats?frequency=${freq}`);
-        el('admin-content').innerHTML = `
-          <div class="kpi-grid">
-            <div class="kpi-card blue">
-              <div class="kpi-icon">🏢</div>
-              <div class="kpi-body"><div class="kpi-num">${s.counts.enterprises}</div><div class="kpi-lbl">Entreprises</div></div>
+        const rrEntries = Object.entries(s.restaurantRevenue || {});
+        const ebEntries = Object.entries(s.enterpriseBudget  || {});
+        const maxRR = rrEntries.length ? Math.max(...rrEntries.map(([,v])=>v)) : 1;
+        const maxEB = ebEntries.length ? Math.max(...ebEntries.map(([,v])=>v)) : 1;
+        content.innerHTML = `
+          <div class="adm-kpi-grid">
+            <div class="adm-kpi blue">
+              <div class="adm-kpi-icon">🏢</div>
+              <div class="adm-kpi-val">${s.counts.enterprises}</div>
+              <div class="adm-kpi-lbl">Entreprises</div>
             </div>
-            <div class="kpi-card green">
-              <div class="kpi-icon">🍴</div>
-              <div class="kpi-body"><div class="kpi-num">${s.counts.restaurants}</div><div class="kpi-lbl">Restaurants</div></div>
+            <div class="adm-kpi green">
+              <div class="adm-kpi-icon">🍴</div>
+              <div class="adm-kpi-val">${s.counts.restaurants}</div>
+              <div class="adm-kpi-lbl">Restaurants</div>
             </div>
-            <div class="kpi-card yellow">
-              <div class="kpi-icon">👤</div>
-              <div class="kpi-body"><div class="kpi-num">${s.counts.employees}</div><div class="kpi-lbl">Employés</div></div>
+            <div class="adm-kpi orange">
+              <div class="adm-kpi-icon">👥</div>
+              <div class="adm-kpi-val">${s.counts.employees}</div>
+              <div class="adm-kpi-lbl">Employés</div>
+              <div class="adm-kpi-sub">👨 ${s.gender.male} · 👩 ${s.gender.female}</div>
             </div>
-            <div class="kpi-card purple">
-              <div class="kpi-icon">💎</div>
-              <div class="kpi-body"><div class="kpi-num">${fmtPrice(s.totalMobilized)}</div><div class="kpi-lbl">Total mobilisé</div></div>
+            <div class="adm-kpi purple">
+              <div class="adm-kpi-icon">💰</div>
+              <div class="adm-kpi-val">${fmtPrice(s.totalMobilized)}</div>
+              <div class="adm-kpi-lbl">Total mobilisé</div>
             </div>
           </div>
-          <p style="color:var(--gray);font-size:13px;margin-bottom:16px">👨 ${s.gender.male} hommes · 👩 ${s.gender.female} femmes</p>
-          ${Object.keys(s.restaurantRevenue||{}).length ? `
-          <div class="section-header">
-            <div class="section-icon">🍴</div><h3>Recettes par restaurant</h3>
+          <div class="adm-ov-grid">
+            ${rrEntries.length ? `
+            <div class="adm-rank-card">
+              <div class="adm-rank-title">🍴 Recettes par restaurant</div>
+              ${rrEntries.sort(([,a],[,b])=>b-a).map(([n,v]) => `
+                <div class="adm-rank-row">
+                  <div class="adm-rank-name">${esc(n)}</div>
+                  <div class="adm-rank-bar-wrap"><div class="adm-rank-bar green" style="width:${Math.round(v/maxRR*100)}%"></div></div>
+                  <div class="adm-rank-val">${fmtPrice(v)}</div>
+                </div>`).join('')}
+            </div>` : ''}
+            ${ebEntries.length ? `
+            <div class="adm-rank-card">
+              <div class="adm-rank-title">🏢 Budget par entreprise</div>
+              ${ebEntries.sort(([,a],[,b])=>b-a).map(([n,v]) => `
+                <div class="adm-rank-row">
+                  <div class="adm-rank-name">${esc(n)}</div>
+                  <div class="adm-rank-bar-wrap"><div class="adm-rank-bar blue" style="width:${Math.round(v/maxEB*100)}%"></div></div>
+                  <div class="adm-rank-val">${fmtPrice(v)}</div>
+                </div>`).join('')}
+            </div>` : ''}
           </div>
-          <ul class="item-list">${Object.entries(s.restaurantRevenue).map(([n,v])=>`<li>${esc(n)}<span class="badge green">${fmtPrice(v)}</span></li>`).join('')}</ul>` : ''}
-          ${Object.keys(s.enterpriseBudget||{}).length ? `
-          <div class="section-header" style="margin-top:16px">
-            <div class="section-icon">🏢</div><h3>Budget par entreprise</h3>
-          </div>
-          <ul class="item-list">${Object.entries(s.enterpriseBudget).map(([n,v])=>`<li>${esc(n)}<span class="badge blue">${fmtPrice(v)}</span></li>`).join('')}</ul>` : ''}`;
+          ${(!rrEntries.length && !ebEntries.length) ? '<p class="empty" style="margin-top:24px">Aucune activité sur cette période.</p>' : ''}`;
         break;
       }
+
       case 'ent': {
         const data = await api('GET', '/api/admin/enterprises');
-        el('admin-content').innerHTML = data.length ? `
-          <table class="choice-table">
-            <thead><tr>
-              <th>Entreprise</th><th>Email</th><th>Téléphone</th>
-              <th>Localisation</th><th>Inscrit le</th><th></th>
-            </tr></thead>
-            <tbody>${data.map(e => `<tr>
-              <td><strong>${esc(e.companyName)}</strong></td>
-              <td>${esc(e.email)}</td>
-              <td>${esc(e.phone || '—')}</td>
-              <td>${e.location
-                ? `<a href="${esc(e.location)}" target="_blank" class="map-link">📍 Maps</a>`
-                : '—'}</td>
-              <td>${fmtDateTime(e.createdAt)}</td>
-              <td><button class="btn danger sm" onclick="adminDelete('enterprise','${e.id}')">🗑️</button></td>
-            </tr>`).join('')}</tbody>
-          </table>` : '<p class="empty">Aucune entreprise.</p>';
+        content.innerHTML = data.length ? `
+          <div class="adm-search-bar">
+            <input type="text" class="adm-search-input" placeholder="🔍 Rechercher une entreprise…" oninput="adminFilter(this,'adm-ent-grid')"/>
+          </div>
+          <div class="adm-card-grid" id="adm-ent-grid">
+            ${data.map(e => {
+              const initial = (e.companyName||'?').charAt(0).toUpperCase();
+              return `<div class="adm-card" data-search="${esc((e.companyName||'').toLowerCase())} ${esc((e.email||'').toLowerCase())}">
+                <div class="adm-card-head">
+                  <div class="adm-card-avatar blue">${initial}</div>
+                  <div class="adm-card-meta">
+                    <div class="adm-card-name">${esc(e.companyName)}</div>
+                    <div class="adm-card-sub">${esc(e.email)}</div>
+                  </div>
+                  <button class="btn danger sm adm-del-btn" onclick="adminDelete('enterprise','${e.id}')">🗑️</button>
+                </div>
+                <div class="adm-card-body">
+                  ${e.phone ? `<span class="adm-info-pill">📞 ${esc(e.phone)}</span>` : ''}
+                  ${e.location ? `<a href="${esc(e.location)}" target="_blank" class="adm-info-pill link">📍 Localisation</a>` : ''}
+                  <span class="adm-info-pill muted">📅 ${fmtDate(e.createdAt)}</span>
+                </div>
+              </div>`;
+            }).join('')}
+          </div>` : '<p class="empty">Aucune entreprise enregistrée.</p>';
         break;
       }
+
       case 'rst': {
         const data = await api('GET', '/api/admin/restaurants');
-        el('admin-content').innerHTML = data.length ? `
-          <table class="choice-table">
-            <thead><tr>
-              <th>Restaurant</th><th>Gérant</th><th>Email</th>
-              <th>Téléphone</th><th>Spécialité</th><th>Adresse</th>
-              <th>Paiements</th><th>Inscrit le</th><th></th>
-            </tr></thead>
-            <tbody>${data.map(r => `<tr>
-              <td><strong>${esc(r.restaurantName)}</strong></td>
-              <td>${esc(r.fullName)}</td>
-              <td>${esc(r.email)}</td>
-              <td>${esc(r.phone || '—')}</td>
-              <td>${esc(r.specialty || '—')}</td>
-              <td>${esc(r.address || '—')}</td>
-              <td>${r.paymentInfo?.length
-                ? r.paymentInfo.map(p => `<span class="badge">${esc(p.type)}: ${esc(p.number)}</span>`).join(' ')
-                : '—'}</td>
-              <td>${fmtDateTime(r.createdAt)}</td>
-              <td><button class="btn danger sm" onclick="adminDelete('restaurant','${r.id}')">🗑️</button></td>
-            </tr>`).join('')}</tbody>
-          </table>` : '<p class="empty">Aucun restaurant.</p>';
+        content.innerHTML = data.length ? `
+          <div class="adm-search-bar">
+            <input type="text" class="adm-search-input" placeholder="🔍 Rechercher un restaurant…" oninput="adminFilter(this,'adm-rst-grid')"/>
+          </div>
+          <div class="adm-card-grid" id="adm-rst-grid">
+            ${data.map(r => {
+              const initial = (r.restaurantName||'?').charAt(0).toUpperCase();
+              const specs = Array.isArray(r.specialties) ? r.specialties : (r.specialty ? [r.specialty] : []);
+              return `<div class="adm-card" data-search="${esc((r.restaurantName||'').toLowerCase())} ${esc((r.fullName||'').toLowerCase())} ${esc((r.email||'').toLowerCase())}">
+                <div class="adm-card-head">
+                  <div class="adm-card-avatar green">${initial}</div>
+                  <div class="adm-card-meta">
+                    <div class="adm-card-name">${esc(r.restaurantName)}</div>
+                    <div class="adm-card-sub">👤 ${esc(r.fullName)} · ${esc(r.email)}</div>
+                  </div>
+                  <button class="btn danger sm adm-del-btn" onclick="adminDelete('restaurant','${r.id}')">🗑️</button>
+                </div>
+                <div class="adm-card-body">
+                  ${r.phone ? `<span class="adm-info-pill">📞 ${esc(r.phone)}</span>` : ''}
+                  ${r.address ? `<span class="adm-info-pill">📍 ${esc(r.address)}</span>` : ''}
+                  ${specs.map(s => `<span class="adm-info-pill spec">${esc(s)}</span>`).join('')}
+                  ${(r.paymentInfo||[]).map(p => `<span class="adm-info-pill pay">💳 ${esc(p.type)}: ${esc(p.number)}</span>`).join('')}
+                  <span class="adm-info-pill muted">📅 ${fmtDate(r.createdAt)}</span>
+                </div>
+              </div>`;
+            }).join('')}
+          </div>` : '<p class="empty">Aucun restaurant enregistré.</p>';
         break;
       }
+
       case 'emp': {
         const data = await api('GET', '/api/admin/employees');
-        el('admin-content').innerHTML = data.length ? `
-          <table class="choice-table">
-            <thead><tr>
-              <th>Employé</th><th>Genre</th><th>Entreprise</th>
-              <th>Inscrit le</th><th></th>
-            </tr></thead>
-            <tbody>${data.map(e => `<tr>
-              <td><strong>${esc(e.fullName)}</strong></td>
-              <td>${e.gender === 'female' ? '👩 Femme' : '👨 Homme'}</td>
-              <td>${esc(e.enterpriseName)}</td>
-              <td>${fmtDateTime(e.createdAt)}</td>
-              <td><button class="btn danger sm" onclick="adminDelete('employee','${e.id}')">🗑️</button></td>
-            </tr>`).join('')}</tbody>
-          </table>` : '<p class="empty">Aucun employé.</p>';
+        content.innerHTML = data.length ? `
+          <div class="adm-search-bar">
+            <input type="text" class="adm-search-input" placeholder="🔍 Rechercher un employé…" oninput="adminFilter(this,'adm-emp-grid')"/>
+          </div>
+          <div class="adm-card-grid" id="adm-emp-grid">
+            ${data.map(e => {
+              const initial = (e.firstName || e.fullName || '?').charAt(0).toUpperCase();
+              const gColor = e.gender === 'female' ? 'pink' : 'blue';
+              return `<div class="adm-card" data-search="${esc((e.fullName||'').toLowerCase())} ${esc((e.enterpriseName||'').toLowerCase())} ${esc((e.employeeId||'').toLowerCase())}">
+                <div class="adm-card-head">
+                  <div class="adm-card-avatar ${gColor}">${initial}</div>
+                  <div class="adm-card-meta">
+                    <div class="adm-card-name">${e.gender === 'female' ? '👩' : '👨'} ${esc(e.fullName)}</div>
+                    <div class="adm-card-sub">🏢 ${esc(e.enterpriseName)}</div>
+                  </div>
+                  <button class="btn danger sm adm-del-btn" onclick="adminDelete('employee','${e.id}')">🗑️</button>
+                </div>
+                <div class="adm-card-body">
+                  ${e.employeeId ? `<span class="adm-info-pill mono">🔑 ${esc(e.employeeId)}</span>` : ''}
+                  ${e.whatsapp   ? `<span class="adm-info-pill">📱 ${esc(e.whatsapp)}</span>` : ''}
+                  <span class="adm-info-pill muted">📅 ${fmtDate(e.createdAt)}</span>
+                </div>
+              </div>`;
+            }).join('')}
+          </div>` : '<p class="empty">Aucun employé enregistré.</p>';
         break;
       }
+
       case 'del': {
         const data = await api('GET', '/api/admin/deletion-requests');
-        el('admin-content').innerHTML = data.length
-          ? `<table class="choice-table"><thead><tr><th>Nom</th><th>Type</th><th>Email</th><th>Date</th><th>Raison</th></tr></thead><tbody>${
-              data.map(d => `<tr>
-                <td>${esc(d.userName)}</td><td>${esc(d.userType)}</td><td>${esc(d.email)}</td>
-                <td>${fmtDateTime(d.deletedAt)}</td><td>${esc(d.reason)}</td>
-              </tr>`).join('')}</tbody></table>`
-          : '<p class="empty">Aucune suppression.</p>';
+        const typeColor = { enterprise: 'blue', restaurant: 'green', employee: 'orange' };
+        content.innerHTML = data.length ? `
+          <div class="adm-del-timeline">
+            ${data.map(d => `
+              <div class="adm-del-item">
+                <div class="adm-del-dot ${typeColor[d.userType]||'muted'}"></div>
+                <div class="adm-del-body">
+                  <div class="adm-del-top">
+                    <span class="adm-del-name">${esc(d.userName)}</span>
+                    <span class="adm-del-badge ${typeColor[d.userType]||'muted'}">${esc(d.userType)}</span>
+                    <span class="adm-del-date">${fmtDateTime(d.deletedAt)}</span>
+                  </div>
+                  <div class="adm-del-email">${esc(d.email)}</div>
+                  ${d.reason ? `<div class="adm-del-reason">"${esc(d.reason)}"</div>` : ''}
+                </div>
+              </div>`).join('')}
+          </div>` : '<p class="empty">Aucune suppression enregistrée.</p>';
         break;
       }
     }
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) { content.innerHTML = ''; toast(e.message, 'error'); }
+}
+
+function adminFilter(input, gridId) {
+  const q = input.value.toLowerCase();
+  document.querySelectorAll(`#${gridId} .adm-card`).forEach(card => {
+    card.style.display = card.dataset.search.includes(q) ? '' : 'none';
+  });
 }
 
 function adminTab(tab, btn) {

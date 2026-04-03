@@ -1,0 +1,13 @@
+{
+  "exec": "node server.js",
+  "watch": ["server.js", "db.js"],
+  "ext": "js",
+  "delay": "1000",
+  "ignore": [
+    "data/**",
+    "public/**",
+    ".wwebjs_auth/**",
+    "node_modules/**",
+    "tests/**"
+  ]
+}

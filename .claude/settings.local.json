@@ -21,7 +21,8 @@
       "Bash(npx jest:*)",
       "Bash(\"F:/Arlette/FoodChoose/lunchapp/data/invoices.json\")",
       "Bash(npm audit:*)",
-      "Bash(awk 'NR>=165 && NR<=175' public/index.html)"
+      "Bash(awk 'NR>=165 && NR<=175' public/index.html)",
+      "Bash(grep:*)"
     ]
   }
 }
