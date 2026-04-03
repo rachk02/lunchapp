@@ -777,11 +777,15 @@ async function saveItem() {
 }
 
 async function deleteItem(id) {
-  try {
-    await api('DELETE', `/api/restaurant/menu/items/${id}`);
-    toast('Article supprimé', 'success');
-    loadMenus();
-  } catch (e) { toast(e.message, 'error'); }
+  const item = _menuItemCache[id];
+  const label = item ? `"${item.name}"` : 'cet article';
+  confirm2(`Supprimer ${label} ?`, async () => {
+    try {
+      await api('DELETE', `/api/restaurant/menu/items/${id}`);
+      toast('Article supprimé', 'success');
+      loadMenus();
+    } catch (e) { toast(e.message, 'error'); }
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
