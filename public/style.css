@@ -1600,3 +1600,150 @@ textarea { resize: vertical; }
   text-align: center; padding: 48px; color: #94a3b8; font-size: 15px;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE GLOBAL — tablette (600–899 px)
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 899px) {
+  /* Admin header */
+  .adm-header { padding: 14px 16px; }
+  .adm-header-title { font-size: 17px; }
+  .adm-header-sub   { font-size: 12px; }
+  .adm-header-icon  { width: 40px; height: 40px; font-size: 18px; }
+
+  /* Admin KPI */
+  .adm-kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+
+  /* Admin cards */
+  .adm-card-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+
+  /* Overview double grid */
+  .adm-ov-grid { grid-template-columns: 1fr; }
+
+  /* Employee profile */
+  .epc-pwd-form { max-width: 100%; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE GLOBAL — mobile (< 600 px)
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 599px) {
+
+  /* ── Fix iOS : empêche le zoom automatique sur les inputs ─────────────── */
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+  /* Réduire seulement les labels et hints, pas les inputs */
+  .field-label, .field-hint, .field-label-sep { font-size: 13px; }
+
+  /* ── Overlays / modales ────────────────────────────────────────────────── */
+  .overlay { align-items: flex-end; padding: 0; }
+  .dialog {
+    border-radius: 16px 16px 0 0;
+    max-height: 92dvh;
+    overflow-y: auto;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 20px 16px 24px;
+  }
+  .dialog.wide { margin: 0; max-width: 100%; }
+
+  /* ── Auth modal ────────────────────────────────────────────────────────── */
+  .auth-modal-card {
+    border-radius: 16px 16px 0 0;
+    width: 100%;
+    max-width: 100%;
+    max-height: 96dvh;
+    overflow-y: auto;
+    padding: 20px 16px 28px;
+    margin: 0;
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+  }
+  .auth-modal-backdrop { align-items: flex-end; padding: 0; }
+  .tabs { gap: 4px; margin-bottom: 14px; }
+  .tab { font-size: 14px; padding: 8px 12px; }
+
+  /* ── Admin header ──────────────────────────────────────────────────────── */
+  .adm-header {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 14px 14px;
+    gap: 12px;
+  }
+  .adm-header-left { gap: 10px; }
+  .adm-header-title { font-size: 16px; }
+  .adm-header-sub   { font-size: 11px; }
+  .adm-header-icon  { width: 36px; height: 36px; font-size: 16px; border-radius: 8px; }
+  .adm-header-actions { width: 100%; justify-content: flex-end; }
+  .adm-select { font-size: 13px; padding: 6px 8px; }
+
+  /* ── Admin tabs ────────────────────────────────────────────────────────── */
+  .admin-tabs { gap: 4px; flex-wrap: wrap; }
+  .atab { font-size: 11px; padding: 7px 6px; flex: 1 1 auto; text-align: center; }
+
+  /* ── Admin KPI ─────────────────────────────────────────────────────────── */
+  .adm-kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 14px; }
+  .adm-kpi { padding: 14px 12px; }
+  .adm-kpi-icon { font-size: 20px; }
+  .adm-kpi-val  { font-size: 20px; }
+  .adm-kpi-lbl  { font-size: 10px; }
+  .adm-kpi-sub  { font-size: 10px; }
+
+  /* ── Admin overview ────────────────────────────────────────────────────── */
+  .adm-ov-grid { grid-template-columns: 1fr; gap: 12px; }
+  .adm-rank-card { padding: 14px; }
+  .adm-rank-name { min-width: 70px; max-width: 80px; font-size: 11px; }
+  .adm-rank-val  { min-width: 60px; font-size: 10px; }
+
+  /* ── Admin search ──────────────────────────────────────────────────────── */
+  .adm-search-input { font-size: 16px !important; padding: 10px 12px; }
+
+  /* ── Admin card grid ───────────────────────────────────────────────────── */
+  .adm-card-grid { grid-template-columns: 1fr; gap: 10px; }
+  .adm-card { padding: 14px; }
+  .adm-card-name { font-size: 13px; }
+  .adm-card-sub  { font-size: 10px; }
+  .adm-card-avatar { width: 36px; height: 36px; font-size: 15px; border-radius: 8px; }
+
+  /* ── Admin deletion timeline ───────────────────────────────────────────── */
+  .adm-del-top { flex-wrap: wrap; }
+  .adm-del-date { margin-left: 0; width: 100%; }
+
+  /* ── Employee profile card ─────────────────────────────────────────────── */
+  .emp-profile-card { flex-direction: column; align-items: center; text-align: center; padding: 16px; }
+  .epc-name  { font-size: 16px; }
+  .epc-pwd-form { max-width: 100%; }
+
+  /* ── Employee ID row ───────────────────────────────────────────────────── */
+  .emp-id-row { flex-wrap: wrap; }
+  .emp-id-hint { width: 100%; text-align: center; }
+
+  /* ── Identifiants créés ────────────────────────────────────────────────── */
+  .cred-row { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .cred-label { min-width: unset; }
+
+  /* ── Pane header ───────────────────────────────────────────────────────── */
+  .pane-header h2 { font-size: 16px; }
+
+  /* ── Employee cards ────────────────────────────────────────────────────── */
+  .emp-grid { gap: 8px; }
+  .emp-card { padding: 10px 12px; }
+
+  /* ── Rank list ─────────────────────────────────────────────────────────── */
+  .rank-row { gap: 6px; }
+  .rank-fill { min-width: 20px; }
+
+  /* ── Resto profile card ────────────────────────────────────────────────── */
+  .rpc-top { flex-direction: column; gap: 10px; }
+  .rpc-photo { width: 64px; height: 64px; }
+
+  /* ── Menu item cards ───────────────────────────────────────────────────── */
+  .menu-item-list { grid-template-columns: 1fr; }
+
+  /* ── Archive / search filters ──────────────────────────────────────────── */
+  .arch-filter-row { flex-direction: column; gap: 8px; }
+  .arch-filter-field { min-width: unset; width: 100%; }
+  .arch-date-input { width: 100%; }
+}
+

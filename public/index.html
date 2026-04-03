@@ -2,7 +2,10 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
 <title>LunchApp</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg"/>
 <link rel="stylesheet" href="style.css"/>
@@ -570,8 +573,8 @@
       <input id="emp-employee-id" type="text" placeholder="Ex: JeanDupont" maxlength="30" oninput="this.dataset.manual='1'"/>
       <span id="emp-id-hint" class="emp-id-hint hidden">✨ Auto-suggéré</span>
     </div>
-    <div class="field-label">Numéro WhatsApp</div>
-    <input id="emp-whatsapp" type="tel" placeholder="Ex: 22664046120"/>
+    <div class="field-label">Email <span style="font-size:11px;color:var(--gray)">(l'employé recevra ses identifiants ici)</span></div>
+    <input id="emp-email" type="email" placeholder="prenom@email.com"/>
     <div class="field-label">Sexe *</div>
     <select id="emp-gender">
       <option value="">-- Choisir --</option>

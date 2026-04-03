@@ -13,75 +13,8 @@ const path       = require('path');
 const nodemailer = require('nodemailer');
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
-const { fork } = require('child_process');
 
-// ── WhatsApp — processus enfant isolé ────────────────────────────────────────
-// Puppeteer/Chromium tourne dans wa-worker.js (processus séparé).
-// S'il crash, seul le worker meurt — le serveur Express continue sans interruption.
-
-let waWorker      = null;
-let waReady       = false;
-let _waRetryTimer = null;
 let _shuttingDown = false;
-const _waMsgQueue = []; // file d'attente des messages en attente de readiness
-
-function _flushWaQueue() {
-  while (_waMsgQueue.length && waReady && waWorker) {
-    const { to, text } = _waMsgQueue.shift();
-    try { waWorker.send({ type: 'send', to, text }); } catch (e) {
-      console.error('[WhatsApp] Erreur IPC (flush) :', e.message);
-    }
-  }
-}
-
-function spawnWaWorker() {
-  if (_shuttingDown) return;
-  if (waWorker) { try { waWorker.kill(); } catch {} waWorker = null; }
-
-  waWorker = fork(path.join(__dirname, 'wa-worker.js'), [], {
-    env: { ...process.env },
-    silent: false,
-  });
-
-  waWorker.on('message', msg => {
-    if (msg.type === 'ready') {
-      waReady = true;
-      console.log('[WhatsApp] ✅ Worker prêt');
-      _flushWaQueue(); // envoyer les messages mis en attente
-    }
-    if (msg.type === 'disconnected') { waReady = false; }
-    if (msg.type === 'auth_failure') { waReady = false; }
-  });
-
-  waWorker.on('exit', (code, signal) => {
-    waReady = false;
-    waWorker = null;
-    if (_shuttingDown) return;
-    console.warn(`[WhatsApp] Worker terminé (code=${code} signal=${signal}) — relance dans 10 s`);
-    if (!_waRetryTimer) {
-      _waRetryTimer = setTimeout(() => { _waRetryTimer = null; spawnWaWorker(); }, 10000);
-    }
-  });
-
-  waWorker.on('error', err => {
-    console.error('[WhatsApp] Erreur worker :', err.message);
-  });
-}
-
-function initWhatsApp() { spawnWaWorker(); }
-
-async function sendWhatsApp(to, message) {
-  if (!to) return;
-  if (!waReady || !waWorker) {
-    // Mettre en file d'attente — sera envoyé dès que le worker sera prêt
-    _waMsgQueue.push({ to, text: message });
-    console.log(`[WhatsApp] En attente (queue: ${_waMsgQueue.length}) → ${to}`);
-    return;
-  }
-  try { waWorker.send({ type: 'send', to, text: message }); } catch (e) {
-    console.error('[WhatsApp] Erreur IPC :', e.message);
-  }
-}
 
 const app        = express();
 const PORT       = process.env.PORT       || 3000;
@@ -110,6 +43,49 @@ const mailer = nodemailer.createTransport({
     pass: process.env.MAIL_PASS,
   },
 });
+
+async function sendCredentialsEmail({ to, firstName, employeeId, password, enterpriseName }) {
+  if (!process.env.MAIL_USER || !process.env.MAIL_PASS ||
+      process.env.MAIL_PASS === 'votre_mot_de_passe_application_gmail') return;
+  const html = `
+  <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;border:1px solid #E2E8F0;border-radius:10px;overflow:hidden">
+    <div style="background:#F97316;padding:24px 32px">
+      <h1 style="color:#fff;margin:0;font-size:22px">🍽️ LunchApp</h1>
+    </div>
+    <div style="padding:32px">
+      <h2 style="margin-top:0">Bonjour ${firstName} 👋</h2>
+      <p>Votre compte employé chez <strong>${enterpriseName}</strong> a été créé sur <strong>LunchApp</strong>.</p>
+      <p>Voici vos identifiants de connexion :</p>
+      <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:20px 24px;margin:20px 0">
+        <p style="margin:0 0 10px"><span style="color:#64748B;font-size:12px;text-transform:uppercase;font-weight:600;letter-spacing:.05em">Identifiant</span><br/>
+          <strong style="font-family:monospace;font-size:18px;color:#F97316">${employeeId}</strong></p>
+        <p style="margin:0"><span style="color:#64748B;font-size:12px;text-transform:uppercase;font-weight:600;letter-spacing:.05em">Mot de passe</span><br/>
+          <strong style="font-family:monospace;font-size:18px;color:#1E293B">${password}</strong></p>
+      </div>
+      <p style="color:#475569">Connectez-vous sur l'application et changez votre mot de passe depuis votre profil.</p>
+      <div style="margin:24px 0;text-align:center">
+        <a href="${APP_URL}" style="background:#F97316;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold">
+          Se connecter à LunchApp
+        </a>
+      </div>
+      <p style="color:#94A3B8;font-size:12px">Ne partagez pas ces identifiants avec d'autres personnes.</p>
+    </div>
+    <div style="background:#F1F5F9;padding:14px 32px;font-size:12px;color:#94A3B8;text-align:center">
+      © ${new Date().getFullYear()} LunchApp — Tous droits réservés
+    </div>
+  </div>`;
+  try {
+    await mailer.sendMail({
+      from:    process.env.MAIL_FROM || 'LunchApp <noreply@lunchapp.com>',
+      to,
+      subject: `🔑 Vos identifiants LunchApp — ${enterpriseName}`,
+      html,
+    });
+    console.log(`[Mail] Identifiants envoyés → ${to}`);
+  } catch (e) {
+    console.error('[Mail] Erreur envoi identifiants :', e.message);
+  }
+}
 
 async function sendWelcomeEmail({ to, name, role }) {
   if (!process.env.MAIL_USER || !process.env.MAIL_PASS ||
@@ -825,7 +801,7 @@ app.get('/api/enterprise/employees', auth, requireRole('enterprise'), async (req
 });
 
 app.post('/api/enterprise/employees', auth, requireRole('enterprise'), async (req, res) => {
-  const { firstName, lastName, whatsapp, gender, password, employeeId: customId } = req.body;
+  const { firstName, lastName, whatsapp, email, gender, password, employeeId: customId } = req.body;
   if (!firstName || !lastName) return res.status(400).json({ error: 'Prénom et nom requis' });
   if (!['male', 'female'].includes(gender)) return res.status(400).json({ error: 'Genre requis (male/female)' });
   if (!customId || !/^[A-Za-z][A-Za-z0-9._-]{2,29}$/.test(String(customId))) return res.status(400).json({ error: 'ID employé invalide — commence par une lettre, 3 à 30 caractères' });
@@ -852,19 +828,19 @@ app.post('/api/enterprise/employees', auth, requireRole('enterprise'), async (re
   const employeeId = customId;
   const employee = {
     id: uid(), employeeId, firstName: firstName.trim(), lastName: lastName.trim(),
-    fullName, gender, whatsapp: whatsapp || '', password: hashed,
+    fullName, gender, whatsapp: whatsapp || '', email: email || '',
+    password: hashed,
     role: 'employee', enterpriseId: req.user.id, enterpriseName: req.user.companyName,
     createdAt: new Date().toISOString(),
   };
   employees.push(employee);
   await write('employees', employees);
 
-  // Envoyer identifiants par WhatsApp
-  if (whatsapp) {
-    const msg = `Bonjour ${firstName} 👋\n\nVotre compte LunchApp a été créé.\n\n` +
-      `🆔 Identifiant : ${employeeId}\n🔑 Mot de passe : ${finalPassword}\n\n` +
-      `Connectez-vous sur l'application et changez votre mot de passe si vous le souhaitez.`;
-    sendWhatsApp(whatsapp, msg);
+  const enterpriseName = req.user.companyName || 'votre entreprise';
+
+  // Envoyer identifiants par email
+  if (email) {
+    sendCredentialsEmail({ to: email, firstName, employeeId, password: finalPassword, enterpriseName });
   }
 
   const { password: _, ...safe } = employee;
@@ -2353,19 +2329,10 @@ process.on('exit', code => {
 });
 
 // ── Arrêt propre ─────────────────────────────────────────────────────────────
-async function gracefulShutdown(signal) {
+function gracefulShutdown(signal) {
   if (_shuttingDown) return;
   _shuttingDown = true;
-  if (_waRetryTimer) { clearTimeout(_waRetryTimer); _waRetryTimer = null; }
   console.log(`\n[Shutdown] Signal ${signal} reçu — fermeture en cours…`);
-  try {
-    if (waWorker) {
-      waWorker.kill();
-      console.log('[Shutdown] Worker WhatsApp arrêté.');
-    }
-  } catch (e) {
-    console.error('[Shutdown] Erreur arrêt worker :', e.message);
-  }
   process.exit(0);
 }
 
@@ -2375,9 +2342,6 @@ async function gracefulShutdown(signal) {
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`🚀 LunchApp v2 démarré → http://localhost:${PORT}`);
-    // WhatsApp initialisé APRÈS que le serveur HTTP est opérationnel
-    // → un crash Puppeteer ne peut plus tuer le serveur Express
-    setTimeout(initWhatsApp, 3000);
   });
 }
 

@@ -1622,7 +1622,7 @@ function openEmpModal(empIdOrNull) {
     const firstName = el('emp-firstname').value.trim();
     if (firstName) autoFillEmpId();
   }
-  el('emp-whatsapp').value    = emp?.whatsapp || '';
+  el('emp-email').value       = emp?.email || '';
   el('emp-gender').value      = emp?.gender || '';
   el('emp-pwd').value         = '';
   const saveBtn = document.querySelector('#modal-emp .btn.primary');
@@ -1635,7 +1635,7 @@ async function saveEmployee() {
   const firstName  = el('emp-firstname').value.trim();
   const lastName   = el('emp-lastname').value.trim();
   const employeeId = el('emp-employee-id').value.trim().replace(/\s+/g, '');
-  const whatsapp   = el('emp-whatsapp').value.trim().replace(/\s+/g, '');
+  const email      = el('emp-email').value.trim();
   const gender     = el('emp-gender').value;
   const pwd        = el('emp-pwd').value;
 
@@ -1645,8 +1645,8 @@ async function saveEmployee() {
   if (pwd && pwd.length < 6) { toast('Le mot de passe doit contenir au moins 6 caractères', 'error'); return; }
 
   const body = { firstName, lastName, gender, employeeId };
-  if (whatsapp) body.whatsapp = whatsapp;
-  if (pwd) body.password = pwd;
+  if (email) body.email    = email;
+  if (pwd)   body.password = pwd;
 
   try {
     if (id) {
@@ -1659,9 +1659,9 @@ async function saveEmployee() {
       el('cred-name').textContent  = created.fullName || `${firstName} ${lastName}`;
       el('cred-id').textContent    = created.employeeId;
       el('cred-pwd').textContent   = created.plainPassword || '(mot de passe personnalisé)';
-      el('cred-wa-status').textContent = whatsapp
-        ? '📱 Les identifiants ont également été envoyés par WhatsApp.'
-        : 'ℹ️ Aucun numéro WhatsApp — transmettez les identifiants manuellement.';
+      el('cred-wa-status').textContent = email
+        ? `✉️ Identifiants envoyés à ${email}`
+        : 'ℹ️ Aucun email renseigné — transmettez les identifiants manuellement.';
       openModal('modal-credentials');
     }
     loadEntEmployees();
