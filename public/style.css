@@ -1167,12 +1167,49 @@ textarea { resize: vertical; }
 }
 .atab:hover:not(.active) { background: var(--light); color: var(--dark); }
 
+/* ── Hamburger button (visible mobile seulement) ─────────────────────────── */
+.hamburger-btn {
+  display: none;
+  background: none; border: none; cursor: pointer;
+  font-size: 22px; padding: 4px 8px; color: var(--dark);
+  line-height: 1; flex-shrink: 0;
+}
+
+/* ── Backdrop sidebar mobile ──────────────────────────────────────────────── */
+.sidebar-backdrop {
+  position: fixed; inset: 0; z-index: 98;
+  background: rgba(0,0,0,.45);
+  backdrop-filter: blur(2px);
+}
+.sidebar-backdrop.hidden { display: none; }
+
 /* ── Responsive overrides — tablette ────────────────────────────────────── */
 @media (max-width: 899px) {
-  .sb-label { display: none; }
-  .sidebar-item { justify-content: center; }
-  .sidebar-user-meta { display: none; }
-  .sidebar-footer { padding: 12px 4px; justify-content: center; }
+  /* Hamburger visible */
+  .hamburger-btn { display: flex; align-items: center; }
+
+  /* Sidebar cachée par défaut, overlay quand ouverte */
+  #sidebar {
+    position: fixed !important;
+    top: 0; left: 0; bottom: 0;
+    width: 240px !important;
+    z-index: 99;
+    transform: translateX(-100%);
+    transition: transform .25s cubic-bezier(.22,1,.36,1);
+  }
+  #sidebar.mobile-open {
+    transform: translateX(0);
+    box-shadow: 4px 0 32px rgba(0,0,0,.25);
+  }
+  /* Labels et footer toujours visibles quand sidebar ouverte */
+  .sb-label { display: block !important; }
+  .sidebar-item { justify-content: flex-start !important; }
+  .sidebar-user-meta { display: flex !important; }
+  .sidebar-footer { padding: 12px 10px !important; justify-content: flex-start !important; }
+
+  /* Content prend toute la largeur */
+  .app-body { overflow: visible; }
+
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }
   .dash-welcome { padding: 16px 18px; }
   .dash-welcome-info h2 { font-size: 17px; }

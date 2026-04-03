@@ -126,8 +126,8 @@
 
     <!-- Connexion -->
     <div id="pane-login">
-      <div class="field-label">Email <span class="field-label-sep">/</span> Identifiant employé</div>
-      <div class="field-hint">Entreprises et restaurants : votre adresse email · Employés : votre identifiant</div>
+      <div class="field-label">Email <span class="field-label-sep">/</span> Identifiant</div>
+      <div class="field-hint">Entreprises : nom de l'entreprise · Restaurants : nom du restaurant · Employés : votre identifiant</div>
       <input id="l-id" type="text" placeholder="Email ou identifiant employé"/>
       <div class="field-label">Mot de passe</div>
       <div class="pwd-row">
@@ -170,7 +170,6 @@
       <!-- Entreprise -->
       <div id="reg-ent">
         <input id="r-company" type="text" placeholder="Nom de l'entreprise *"/>
-        <input id="r-email" type="email" placeholder="Email *"/>
         <input id="r-phone" type="tel" placeholder="Téléphone"/>
         <input id="r-location" type="text" placeholder="Lien Google Maps (https://...)"/>
         <div class="pwd-row">
@@ -185,7 +184,6 @@
       <div id="reg-rst" class="hidden">
         <input id="r-rname" type="text" placeholder="Nom du restaurant *"/>
         <input id="r-owner" type="text" placeholder="Votre nom complet *"/>
-        <input id="r-remail" type="email" placeholder="Email *"/>
         <input id="r-rphone" type="tel" placeholder="Téléphone"/>
         <input id="r-addr" type="text" placeholder="Adresse (ex: Ouagadougou, Secteur 51)"/>
         <div class="field-label">Spécialités (plusieurs possibles)</div>
@@ -214,6 +212,7 @@
 <!-- ═══ APP ═══ -->
 <div id="screen-app" class="hidden">
   <header class="app-bar">
+    <button class="hamburger-btn" id="hamburger-btn" onclick="toggleMobileSidebar()" aria-label="Menu">☰</button>
     <span class="brand">🍽️ LunchApp</span>
     <div class="app-bar-right">
       <button class="notif-btn" onclick="showPane('notifs')" title="Notifications">
@@ -226,6 +225,7 @@
     </div>
   </header>
 
+  <div id="sidebar-backdrop" class="sidebar-backdrop hidden" onclick="closeMobileSidebar()"></div>
   <div class="app-body">
     <!-- Sidebar nav -->
     <nav id="sidebar" class="sidebar"></nav>

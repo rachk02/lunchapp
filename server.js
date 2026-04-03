@@ -307,11 +307,22 @@ app.post('/api/login', async (req, res) => {
     return res.json({ token, user: { id: SUPERADMIN.id, role: 'superadmin', fullName: SUPERADMIN.fullName } });
   }
 
-  // Chercher par email dans entreprises puis restaurants
+  // Chercher par email OU nom d'entreprise/restaurant
   let userObj = null;
-  for (const key of ['enterprises', 'restaurants']) {
-    const found = (await read(key)).find(u => u.email?.toLowerCase() === id);
-    if (found) { userObj = found; break; }
+  const enterprises = await read('enterprises');
+  const ent = enterprises.find(u =>
+    (u.email && u.email.toLowerCase() === id) ||
+    u.companyName?.toLowerCase() === id
+  );
+  if (ent) userObj = ent;
+
+  if (!userObj) {
+    const restaurants = await read('restaurants');
+    const rst = restaurants.find(u =>
+      (u.email && u.email.toLowerCase() === id) ||
+      u.restaurantName?.toLowerCase() === id
+    );
+    if (rst) userObj = rst;
   }
 
   // Chercher par identifiant employé (employeeId) ou nom complet
@@ -440,16 +451,18 @@ app.post('/api/auth/reset-password', async (req, res) => {
 // ── Inscription entreprise ────────────────────────────────────────────────────
 app.post('/api/enterprise/register', async (req, res) => {
   const { companyName, email, password, phone, location } = req.body;
-  if (!companyName || !email || !password) return res.status(400).json({ error: 'Champs requis' });
+  if (!companyName || !password) return res.status(400).json({ error: 'Champs requis' });
   if (!validatePassword(password)) return res.status(400).json({ error: 'Mot de passe trop faible (8 car. min, maj, min, chiffre, spécial)' });
 
   const enterprises = await read('enterprises');
-  if (enterprises.find(e => e.email?.toLowerCase() === email.toLowerCase()))
+  if (enterprises.find(e => e.companyName?.toLowerCase() === companyName.trim().toLowerCase()))
+    return res.status(409).json({ error: 'Ce nom d\'entreprise est déjà utilisé' });
+  if (email && enterprises.find(e => e.email?.toLowerCase() === email.toLowerCase()))
     return res.status(409).json({ error: 'Email déjà utilisé' });
 
   const hashed = await bcrypt.hash(password, 10);
   const enterprise = {
-    id: uid(), companyName: companyName.trim(), email: email.toLowerCase().trim(),
+    id: uid(), companyName: companyName.trim(), email: email ? email.toLowerCase().trim() : '',
     password: hashed, phone: phone || '', location: location || '',
     role: 'enterprise', createdAt: new Date().toISOString(),
   };
@@ -467,17 +480,19 @@ app.post('/api/enterprise/register', async (req, res) => {
 // ── Inscription restaurant ────────────────────────────────────────────────────
 app.post('/api/restauratrice/register', async (req, res) => {
   const { restaurantName, fullName, email, password, phone, specialty, address, paymentInfo } = req.body;
-  if (!restaurantName || !fullName || !email || !password) return res.status(400).json({ error: 'Champs requis' });
+  if (!restaurantName || !fullName || !password) return res.status(400).json({ error: 'Champs requis' });
   if (!validatePassword(password)) return res.status(400).json({ error: 'Mot de passe trop faible' });
 
   const restaurants = await read('restaurants');
-  if (restaurants.find(r => r.email?.toLowerCase() === email.toLowerCase()))
+  if (restaurants.find(r => r.restaurantName?.toLowerCase() === restaurantName.trim().toLowerCase()))
+    return res.status(409).json({ error: 'Ce nom de restaurant est déjà utilisé' });
+  if (email && restaurants.find(r => r.email?.toLowerCase() === email.toLowerCase()))
     return res.status(409).json({ error: 'Email déjà utilisé' });
 
   const hashed = await bcrypt.hash(password, 10);
   const restaurant = {
     id: uid(), restaurantName: restaurantName.trim(), fullName: fullName.trim(),
-    email: email.toLowerCase().trim(), password: hashed,
+    email: email ? email.toLowerCase().trim() : '', password: hashed,
     phone: phone || '',
     specialty: Array.isArray(specialty) ? specialty : (specialty ? [specialty] : []),
     address: address || '',
