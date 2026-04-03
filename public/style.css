@@ -1167,47 +1167,69 @@ textarea { resize: vertical; }
 }
 .atab:hover:not(.active) { background: var(--light); color: var(--dark); }
 
-/* ── Hamburger button (visible mobile seulement) ─────────────────────────── */
+/* ── Hamburger button ─────────────────────────────────────────────────────── */
+/*   Visible uniquement sur tablette (600-899px).                             */
+/*   Sur mobile (<600px) la bottom-nav remplace la sidebar → pas de hamburger */
 .hamburger-btn {
   display: none;
   background: none; border: none; cursor: pointer;
-  font-size: 22px; padding: 4px 8px; color: var(--dark);
+  font-size: 22px; padding: 6px 10px; color: var(--dark);
   line-height: 1; flex-shrink: 0;
+  min-width: 44px; min-height: 44px;           /* taille minimale tap target */
+  align-items: center; justify-content: center;
 }
 
-/* ── Backdrop sidebar mobile ──────────────────────────────────────────────── */
+/* ── Backdrop sidebar tablette ────────────────────────────────────────────── */
+/*   Positionné à partir de left:240px pour ne jamais couvrir la sidebar.    */
+/*   Sur mobile la sidebar est hidden donc le backdrop n'est jamais affiché.  */
 .sidebar-backdrop {
-  position: fixed; inset: 0; z-index: 98;
+  position: fixed;
+  top: 60px;            /* démarre sous l'app-bar (60px) */
+  left: 240px;          /* commence après la sidebar (240px) */
+  right: 0; bottom: 0;
+  z-index: 97;
   background: rgba(0,0,0,.45);
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(1px);
 }
 .sidebar-backdrop.hidden { display: none; }
 
-/* ── Responsive overrides — tablette ────────────────────────────────────── */
-@media (max-width: 899px) {
-  /* Hamburger visible */
-  .hamburger-btn { display: flex; align-items: center; }
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE TABLETTE (600 – 899 px) — Overlay sidebar
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (min-width: 600px) and (max-width: 899px) {
+  /* Hamburger visible sur tablette seulement */
+  .hamburger-btn { display: flex; }
 
-  /* Sidebar cachée par défaut, overlay quand ouverte */
+  /* Sidebar : fixée, cachée par défaut, glisse depuis la gauche */
   #sidebar {
     position: fixed !important;
-    top: 0; left: 0; bottom: 0;
+    top: 60px;          /* sous l'app-bar */
+    left: 0; bottom: 0;
     width: 240px !important;
-    z-index: 99;
+    z-index: 100;
     transform: translateX(-100%);
     transition: transform .25s cubic-bezier(.22,1,.36,1);
+    overflow-y: auto;
   }
   #sidebar.mobile-open {
     transform: translateX(0);
     box-shadow: 4px 0 32px rgba(0,0,0,.25);
   }
-  /* Labels et footer toujours visibles quand sidebar ouverte */
-  .sb-label { display: block !important; }
-  .sidebar-item { justify-content: flex-start !important; }
-  .sidebar-user-meta { display: flex !important; }
-  .sidebar-footer { padding: 12px 10px !important; justify-content: flex-start !important; }
 
-  /* Content prend toute la largeur */
+  /* Quand la sidebar est ouverte, les items ressemblent au style desktop */
+  #sidebar.mobile-open .sidebar-item {
+    flex-direction: row !important;
+    font-size: 13px !important;
+    padding: 10px 12px !important;
+    gap: 10px !important;
+    text-align: left !important;
+  }
+  #sidebar.mobile-open .sb-icon  { font-size: 18px !important; }
+  #sidebar.mobile-open .sb-label { display: block !important; font-size: 13px !important; font-weight: 500 !important; }
+  #sidebar.mobile-open .sidebar-user-meta  { display: flex !important; }
+  #sidebar.mobile-open .sidebar-footer     { padding: 12px 10px !important; justify-content: flex-start !important; }
+
+  /* Content : pleine largeur (sidebar en overlay ne prend plus d'espace dans le flux) */
   .app-body { overflow: visible; }
 
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }
@@ -1217,26 +1239,102 @@ textarea { resize: vertical; }
   .atab { flex: 1 1 40%; border-right: 1px solid var(--border); }
 }
 
-/* ── Responsive overrides — mobile ──────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE MOBILE (< 600 px) — correctifs boutons & actions
+   ═══════════════════════════════════════════════════════════════════════════ */
 @media (max-width: 599px) {
+  /* Hamburger inutile sur mobile : bottom-nav gère la navigation */
+  .hamburger-btn { display: none !important; }
+
+  /* ── KPI cards ──────────────────────────────────────────────────────────── */
   .kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .kpi-card { padding: 12px 10px; gap: 8px; }
   .kpi-num { font-size: 18px; }
   .kpi-icon { width: 36px; height: 36px; font-size: 16px; border-radius: 8px; }
+
+  /* ── Dashboard welcome ──────────────────────────────────────────────────── */
   .dash-welcome { flex-direction: column; gap: 12px; text-align: center; padding: 16px; }
   .dash-welcome-info h2 { white-space: normal; font-size: 18px; }
+
+  /* ── Inner tab bars ─────────────────────────────────────────────────────── */
   .dash-tab-bar { gap: 2px; }
   .dtab { font-size: 11px; padding: 8px 6px; }
   .admin-tabs { flex-wrap: wrap; }
   .atab { font-size: 11px; padding: 9px 5px; flex: 1 1 30%; }
-  .content { padding: 14px 12px; padding-bottom: 72px; }
+
+  /* ── Content ────────────────────────────────────────────────────────────── */
+  .content { padding: 14px 12px; padding-bottom: 80px; } /* 80px = bottom-nav 60px + marge */
   .pane { max-width: 100%; }
+
+  /* ── App-bar compacte ───────────────────────────────────────────────────── */
+  .app-bar { gap: 6px; }
+  .app-bar-right { gap: 6px; }
+  .notif-btn { font-size: 18px; padding: 4px; }
+  /* Bouton déconnexion : icône seule sur mobile */
+  .btn.ghost.sm[onclick="doLogout()"] { font-size: 0 !important; padding: 8px !important; min-width: 36px; }
+  .btn.ghost.sm[onclick="doLogout()"]::before { content: '⏻'; font-size: 18px; }
+
+  /* ── Pane headers : flex-wrap pour que les boutons d'action restent visibles */
+  .pane-header { flex-wrap: wrap; gap: 8px; }
+  .pane-header h2 { font-size: 15px; flex: 1 1 100%; }   /* titre sur sa propre ligne */
+  .section-header { flex-wrap: wrap; gap: 8px; }
+  .section-header h3 { flex: 1; }
+
+  /* ── Boutons dans les dialogs : toujours accessibles ───────────────────── */
+  .dialog-btns { flex-wrap: wrap; gap: 8px; }
+  .dialog-btns .btn { flex: 1 1 auto; min-width: 80px; }
+
+  /* ── Boutons dans les en-têtes de section (row-between) ────────────────── */
+  .row-between { flex-wrap: wrap; gap: 8px; }
+  .row-between > div { flex-wrap: wrap; gap: 6px; }
+
+  /* ── Cards de commande/facture ──────────────────────────────────────────── */
+  .inv-card-top    { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .inv-card-actions { flex-wrap: wrap; gap: 6px; }
+  .inv-card-actions .btn { flex: 1 1 auto; }
+  .eol-top { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .order-btns { flex-direction: column; }
+  .order-btns .btn { width: 100%; }
+
+  /* ── Segmented controls ─────────────────────────────────────────────────── */
+  .segmented { width: 100%; }
+  .seg-btn { flex: 1; text-align: center; }
+
+  /* ── KPI commandes restaurant ───────────────────────────────────────────── */
   .cmd-kpi-row { grid-template-columns: repeat(3,1fr); gap: 6px; }
-  .cmd-kpi { padding: 10px 10px; }
+  .cmd-kpi { padding: 10px; }
   .cmd-kpi-value { font-size: 17px; }
   .cmd-kpi--orange .cmd-kpi-value { font-size: 13px; }
+
+  /* ── Subscription cards ─────────────────────────────────────────────────── */
   .sub-card { flex-direction: column; align-items: flex-start; }
   .sub-card-right { align-items: flex-start; }
+
+  /* ── Menu item card : boutons toujours accessibles ──────────────────────── */
+  .menu-item-card { flex-wrap: wrap; gap: 6px; }
+  .mic-actions { margin-left: auto; }
+
+  /* ── Resto profile card ─────────────────────────────────────────────────── */
+  .rpc-top { flex-direction: column; align-items: flex-start; gap: 10px; }
+
+  /* ── Admin card actions ─────────────────────────────────────────────────── */
+  .adm-card-head { flex-wrap: wrap; }
+  .adm-del-btn { width: 100%; margin-top: 4px; }
+
+  /* ── Prof field grid ────────────────────────────────────────────────────── */
+  .prof-field-grid { grid-template-columns: 1fr; }
+
+  /* ── Formulaire profil employé ──────────────────────────────────────────── */
+  .emp-profile-card { flex-direction: column; align-items: center; text-align: center; }
+  .epc-pwd-form { max-width: 100%; }
+
+  /* ── ID employé ─────────────────────────────────────────────────────────── */
+  .emp-id-row { flex-wrap: wrap; }
+  .emp-id-hint { width: 100%; text-align: center; }
+
+  /* ── Identifiants créés ─────────────────────────────────────────────────── */
+  .cred-row { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .cred-label { min-width: unset; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
