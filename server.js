@@ -59,8 +59,10 @@ async function sendCredentialsEmail({ to, firstName, employeeId, password, enter
       <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:20px 24px;margin:20px 0">
         <p style="margin:0 0 10px"><span style="color:#64748B;font-size:12px;text-transform:uppercase;font-weight:600;letter-spacing:.05em">Identifiant</span><br/>
           <strong style="font-family:monospace;font-size:18px;color:#F97316">${employeeId}</strong></p>
-        <p style="margin:0"><span style="color:#64748B;font-size:12px;text-transform:uppercase;font-weight:600;letter-spacing:.05em">Mot de passe</span><br/>
+        <p style="margin:0 0 10px"><span style="color:#64748B;font-size:12px;text-transform:uppercase;font-weight:600;letter-spacing:.05em">Mot de passe</span><br/>
           <strong style="font-family:monospace;font-size:18px;color:#1E293B">${password}</strong></p>
+        <p style="margin:0"><span style="color:#64748B;font-size:12px;text-transform:uppercase;font-weight:600;letter-spacing:.05em">Lien de connexion</span><br/>
+          <a href="${APP_URL}" style="font-family:monospace;font-size:15px;color:#0EA5E9">${APP_URL.replace(/^https?:\/\//, '')}</a></p>
       </div>
       <p style="color:#475569">Connectez-vous sur l'application et changez votre mot de passe depuis votre profil.</p>
       <div style="margin:24px 0;text-align:center">
