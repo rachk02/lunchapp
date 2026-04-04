@@ -54,25 +54,27 @@ if (process.env.DATABASE_URL) {
     // new URL() échoue si le mot de passe contient # non encodé → parse manuel.
     const raw = process.env.DATABASE_URL.replace(/^postgresql?:\/\//, '');
     // sépare "user:password" du reste via le DERNIER @ (gère @ et # dans le mdp)
-    const atIdx   = raw.lastIndexOf('@');
-    const creds   = raw.substring(0, atIdx);
+    const atIdx    = raw.lastIndexOf('@');
+    const creds    = raw.substring(0, atIdx);
     const hostPart = raw.substring(atIdx + 1);
     const colonIdx = creds.indexOf(':');
-    const dbUser   = decodeURIComponent(creds.substring(0, colonIdx));
-    const dbPass   = decodeURIComponent(creds.substring(colonIdx + 1));
+    const safeDecode = s => { try { return decodeURIComponent(s); } catch { return s; } };
+    const dbUser   = safeDecode(creds.substring(0, colonIdx));
+    const dbPass   = safeDecode(creds.substring(colonIdx + 1));
     const slashIdx = hostPart.indexOf('/');
     const hostPort = hostPart.substring(0, slashIdx);
     const dbName   = hostPart.substring(slashIdx + 1).split('?')[0];
     const [dbHost, dbPortStr] = hostPort.split(':');
     const dbPort   = parseInt(dbPortStr, 10) || 5432;
 
+    const useSSL = dbHost.includes('supabase') || process.env.DB_SSL === 'true';
     const pool = new Pool({
       host:     dbHost,
       port:     dbPort,
       database: dbName,
       user:     dbUser,
       password: dbPass,
-      ssl:      { rejectUnauthorized: false },
+      ssl:      useSSL ? { rejectUnauthorized: false } : false,
     });
 
     // ── Initialisation de la table (idempotent) ────────────────────────────
