@@ -69,6 +69,7 @@ async function initPg() {
     const [dbHost, dbPortStr] = hostPort.split(':');
     const dbPort   = parseInt(dbPortStr, 10) || 5432;
 
+
     const useSSL = dbHost.includes('supabase') || process.env.DB_SSL === 'true';
 
     const pool = new Pool({
