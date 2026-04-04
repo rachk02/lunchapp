@@ -100,8 +100,8 @@ async function sendWelcomeEmail({ to, name, role }) {
       <h1 style="color:#fff;margin:0;font-size:22px">🍽️ LunchApp</h1>
     </div>
     <div style="padding:32px">
-      <h2 style="margin-top:0">Bienvenue, ${name} !</h2>
-      <p>Votre compte <strong>${roleLabel}</strong> a été créé avec succès sur <strong>LunchApp</strong>.</p>
+      <h2 style="margin-top:0">Félicitations pour votre inscription, ${name} !</h2>
+      <p>Bienvenue sur la plateforme <strong>LunchApp</strong> ! Votre compte <strong>${roleLabel}</strong> a été créé avec succès.</p>
       <p>Vous pouvez dès maintenant vous connecter et commencer à utiliser l'application :</p>
       <ul>
         ${role === 'enterprise' ? `
@@ -132,7 +132,7 @@ async function sendWelcomeEmail({ to, name, role }) {
     await mailer.sendMail({
       from:    process.env.MAIL_FROM || 'LunchApp <noreply@lunchapp.com>',
       to,
-      subject: `✅ Bienvenue sur LunchApp, ${name} !`,
+      subject: `🎉 Félicitations pour votre inscription sur LunchApp !`,
       html,
     });
   } catch (err) {
@@ -191,7 +191,8 @@ function requireRole(...roles) {
 }
 
 function validatePassword(pwd) {
-  return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&._-])[A-Za-z\d@$!%*?&._-]{8,}$/.test(pwd);
+  // Au moins 8 chars, 1 maj, 1 min, 1 chiffre, 1 caractère spécial (inclut #)
+  return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&._\-#^()+={}\[\]|<>,:;~`/\\])[A-Za-z\d@$!%*?&._\-#^()+={}\[\]|<>,:;~`/\\]{8,}$/.test(pwd);
 }
 
 // ── SSE ───────────────────────────────────────────────────────────────────────

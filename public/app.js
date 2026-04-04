@@ -373,19 +373,21 @@ async function doRegister(type) {
     let d;
     if (type === 'enterprise') {
       const companyName = el('r-company').value.trim();
+      const email    = el('r-email').value.trim();
       const phone    = el('r-phone').value.trim();
       const location = el('r-location').value.trim();
       const password = el('r-pwd').value;
-      d = await api('POST', '/api/enterprise/register', { companyName, phone, location, password });
+      d = await api('POST', '/api/enterprise/register', { companyName, email, phone, location, password });
     } else {
       const restaurantName = el('r-rname').value.trim();
       const fullName       = el('r-owner').value.trim();
+      const email          = el('r-remail').value.trim();
       const phone          = el('r-rphone').value.trim();
       const address        = el('r-addr').value.trim();
       const specialty      = collectSpecialties('r-spec-container');
       const paymentInfo    = collectPayEntries('pay-entries');
       const password       = el('r-rpwd').value;
-      d = await api('POST', '/api/restauratrice/register', { restaurantName, fullName, phone, address, specialty, paymentInfo, password });
+      d = await api('POST', '/api/restauratrice/register', { restaurantName, fullName, email, phone, address, specialty, paymentInfo, password });
     }
     token = d.token;
     me    = d.user;

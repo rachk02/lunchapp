@@ -52,7 +52,7 @@ if (process.env.DATABASE_URL) {
     // ── Connexion ──────────────────────────────────────────────────────────
     // SSL toujours activé : Supabase l'exige.
     // new URL() échoue si le mot de passe contient # non encodé → parse manuel.
-    const raw = process.env.DATABASE_URL.replace(/^postgres:\/\//, '');
+    const raw = process.env.DATABASE_URL.replace(/^postgresql?:\/\//, '');
     // sépare "user:password" du reste via le DERNIER @ (gère @ et # dans le mdp)
     const atIdx   = raw.lastIndexOf('@');
     const creds   = raw.substring(0, atIdx);
