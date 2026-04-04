@@ -45,15 +45,17 @@ const jsonAdapter = {
 // ── PostgreSQL / Supabase adapter ─────────────────────────────────────────
 let pgAdapter = null;
 
-if (process.env.DATABASE_URL) {
+async function initPg() {
+  if (!process.env.DATABASE_URL) {
+    console.warn('[DB] DATABASE_URL non défini — stockage JSON local (données non persistantes sur Vercel !)');
+    return;
+  }
+
   try {
     const { Pool } = require('pg');
 
-    // ── Connexion ──────────────────────────────────────────────────────────
-    // SSL toujours activé : Supabase l'exige.
-    // new URL() échoue si le mot de passe contient # non encodé → parse manuel.
-    const raw = process.env.DATABASE_URL.replace(/^postgresql?:\/\//, '');
-    // sépare "user:password" du reste via le DERNIER @ (gère @ et # dans le mdp)
+    // ── Parse manuel pour gérer # et @ dans le mot de passe ───────────────
+    const raw      = process.env.DATABASE_URL.replace(/^postgresql?:\/\//, '');
     const atIdx    = raw.lastIndexOf('@');
     const creds    = raw.substring(0, atIdx);
     const hostPart = raw.substring(atIdx + 1);
@@ -68,31 +70,38 @@ if (process.env.DATABASE_URL) {
     const dbPort   = parseInt(dbPortStr, 10) || 5432;
 
     const useSSL = dbHost.includes('supabase') || process.env.DB_SSL === 'true';
+
     const pool = new Pool({
-      host:     dbHost,
-      port:     dbPort,
-      database: dbName,
-      user:     dbUser,
-      password: dbPass,
-      ssl:      useSSL ? { rejectUnauthorized: false } : false,
+      host:                    dbHost,
+      port:                    dbPort,
+      database:                dbName,
+      user:                    dbUser,
+      password:                dbPass,
+      ssl:                     useSSL ? { rejectUnauthorized: false } : false,
+      connectionTimeoutMillis: 8000,   // échoue rapidement si la DB est inaccessible
+      idleTimeoutMillis:       30000,
+      max:                     3,      // peu de connexions simultanées (serverless)
     });
 
+    // ── Test de connexion avant d'activer l'adapter ────────────────────────
+    await pool.query('SELECT 1');
+    console.log('[DB] PostgreSQL (Supabase) connecté —', dbHost);
+
     // ── Initialisation de la table (idempotent) ────────────────────────────
-    pool.query(`
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS la_data (
         key  TEXT PRIMARY KEY,
         data JSONB NOT NULL DEFAULT '[]'::jsonb
       );
-    `).then(() => {
-      // Seed les clés absentes avec un tableau vide par défaut
-      const keys = Object.keys(FILES);
-      return pool.query(
-        `INSERT INTO la_data (key, data)
-         VALUES ${keys.map((_, i) => `($${i + 1},'[]'::jsonb)`).join(',')}
-         ON CONFLICT (key) DO NOTHING`,
-        keys
-      );
-    }).catch(e => console.error('[DB] Init table error:', e.message));
+    `);
+
+    const keys = Object.keys(FILES);
+    await pool.query(
+      `INSERT INTO la_data (key, data)
+       VALUES ${keys.map((_, i) => `($${i + 1},'[]'::jsonb)`).join(',')}
+       ON CONFLICT (key) DO NOTHING`,
+      keys
+    );
 
     // ── Adapter ────────────────────────────────────────────────────────────
     pgAdapter = {
@@ -109,13 +118,17 @@ if (process.env.DATABASE_URL) {
       },
     };
 
-    console.log('[DB] PostgreSQL (Supabase) connecté —', dbHost);
   } catch (err) {
-    console.error('[DB] Échec init PostgreSQL — fallback JSON local:', err.message);
+    console.error('[DB] Échec connexion PostgreSQL — fallback JSON local:', err.message);
     pgAdapter = null;
   }
-} else {
-  console.warn('[DB] DATABASE_URL non défini — stockage JSON local (données non persistantes sur Vercel !)');
 }
 
-module.exports = pgAdapter || jsonAdapter;
+// Lancer l'init (non bloquant au démarrage, mais attendu avant export)
+const _ready = initPg();
+
+// Export : proxy qui attend que l'init soit terminée avant chaque opération
+module.exports = {
+  async read(key)       { await _ready; return (pgAdapter || jsonAdapter).read(key); },
+  async write(key, data){ await _ready; return (pgAdapter || jsonAdapter).write(key, data); },
+};
