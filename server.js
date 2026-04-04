@@ -191,8 +191,13 @@ function requireRole(...roles) {
 }
 
 function validatePassword(pwd) {
-  // Au moins 8 chars, 1 maj, 1 min, 1 chiffre, 1 caractère spécial (inclut #)
-  return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&._\-#^()+={}\[\]|<>,:;~`/\\])[A-Za-z\d@$!%*?&._\-#^()+={}\[\]|<>,:;~`/\\]{8,}$/.test(pwd);
+  // Au moins 8 chars, 1 maj, 1 min, 1 chiffre, 1 caractère non-alphanumérique
+  if (!pwd || pwd.length < 8) return false;
+  if (!/[a-z]/.test(pwd)) return false;
+  if (!/[A-Z]/.test(pwd)) return false;
+  if (!/[0-9]/.test(pwd)) return false;
+  if (!/[^A-Za-z0-9]/.test(pwd)) return false;
+  return true;
 }
 
 // ── SSE ───────────────────────────────────────────────────────────────────────
