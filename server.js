@@ -2368,4 +2368,5 @@ if (require.main === module) {
   });
 }
 
+// Vercel serverless — export du listener
 module.exports = app;
