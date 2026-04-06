@@ -1,17 +1,32 @@
 [
   {
-    "id": "mnj0097vudn3v8",
-    "employeeId": "MahamadiTassembedo",
-    "firstName": "Mahamadi",
-    "lastName": "TASSEMBEDO",
-    "fullName": "Mahamadi TASSEMBEDO",
-    "gender": "male",
-    "whatsapp": "+22654458712",
-    "email": "tassembedom5@gmail.com",
-    "password": "$2a$10$LWal5kxkVbqCUwt1y2fpke631mlRgZC1QG.x5/MHPORKCOCRzMgyW",
+    "id": "mnko7808mwdn51",
+    "employeeId": "DanissaDala_EII",
+    "firstName": "Danissa",
+    "lastName": "DALA",
+    "fullName": "Danissa DALA",
+    "gender": "female",
+    "whatsapp": "",
+    "email": "danissa.dala@elimmeka.com",
+    "password": "$2a$10$R71WLn8rF3Oqlg8fcdZNGejrmtpH8SCw1GECjxwUdttF0QMUQLJsm",
     "role": "employee",
     "enterpriseId": "mn94fh57vnrd6w",
     "enterpriseName": "El Immeka International",
-    "createdAt": "2026-04-03T14:27:53.131Z"
+    "createdAt": "2026-04-04T18:32:55.112Z"
+  },
+  {
+    "id": "mnnddutwtjzcvt",
+    "employeeId": "RachidFofana",
+    "firstName": "Rachid",
+    "lastName": "Fofana",
+    "fullName": "Rachid Fofana",
+    "gender": "male",
+    "whatsapp": "",
+    "email": "rachid.fofana@elimmeka.com",
+    "password": "$2a$10$gWS7bg4X6pjFTKmwsMjwmujkheDKQih5eVaAjAIWLEXeGz0umKxJy",
+    "role": "employee",
+    "enterpriseId": "mn94fh57vnrd6w",
+    "enterpriseName": "El Immeka International",
+    "createdAt": "2026-04-06T15:53:27.380Z"
   }
 ]
