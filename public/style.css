@@ -1455,33 +1455,236 @@ textarea { resize: vertical; }
 .land-feat-ul li::before { content: '✓'; color: var(--orange); font-weight: 700; flex-shrink: 0; }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   AUTH MODALE v3
+   AUTH MODALE v4 — Amélioré
    ═══════════════════════════════════════════════════════════════════════════ */
 .auth-modal-backdrop {
   position: fixed; inset: 0; z-index: 500;
-  background: rgba(12, 74, 110, .55);
-  backdrop-filter: blur(6px);
+  background: rgba(12, 74, 110, .6);
+  backdrop-filter: blur(8px);
   display: flex; align-items: center; justify-content: center;
   padding: 20px;
 }
 .auth-modal-card {
   background: var(--white);
-  border-radius: 20px;
-  padding: 36px 36px 40px;
-  width: 100%; max-width: 440px;
-  box-shadow: 0 32px 80px rgba(0,0,0,.28);
+  border-radius: 24px;
+  padding: 32px 32px 36px;
+  width: 100%; max-width: 460px;
+  box-shadow: 0 40px 100px rgba(0,0,0,.3);
   position: relative;
-  max-height: 90vh; overflow-y: auto;
+  max-height: 92vh; overflow-y: auto;
 }
 .auth-modal-close {
-  position: absolute; top: 16px; right: 16px;
+  position: absolute; top: 14px; right: 14px;
   background: var(--light); border: none; border-radius: 50%;
-  width: 30px; height: 30px; cursor: pointer;
-  font-size: 13px; color: var(--gray);
+  width: 32px; height: 32px; cursor: pointer;
+  font-size: 14px; color: var(--gray);
   display: flex; align-items: center; justify-content: center;
-  transition: .15s;
+  transition: .2s;
 }
 .auth-modal-close:hover { background: var(--border); color: var(--dark); }
+
+/* ── Auth header (logo + title) ──────────────────────────────────────────── */
+.auth-header { text-align: center; margin-bottom: 20px; }
+.auth-logo {
+  width: 56px; height: 56px; margin: 0 auto 10px;
+  background: linear-gradient(135deg, #F97316, #FB923C);
+  border-radius: 16px; display: flex; align-items: center; justify-content: center;
+  font-size: 28px; box-shadow: 0 8px 24px rgba(249,115,22,.3);
+}
+.auth-title {
+  margin: 0; font-size: 22px; font-weight: 700; color: var(--dark);
+  letter-spacing: -.02em;
+}
+
+/* ── Auth tabs ───────────────────────────────────────────────────────────── */
+.auth-tabs {
+  display: flex; gap: 4px; background: var(--light); border-radius: 12px;
+  padding: 4px; margin-bottom: 24px;
+}
+.auth-tab {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 16px; border: none; border-radius: 10px; cursor: pointer;
+  font-size: 14px; font-weight: 600; color: var(--gray);
+  background: transparent; transition: .2s;
+}
+.auth-tab:hover { color: var(--dark); }
+.auth-tab.active {
+  background: var(--white); color: var(--orange);
+  box-shadow: 0 2px 8px rgba(0,0,0,.08);
+}
+.auth-tab svg { flex-shrink: 0; }
+
+/* ── Input groups ────────────────────────────────────────────────────────── */
+.input-group {
+  position: relative; margin-bottom: 14px;
+}
+.input-group .input-icon {
+  position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+  color: var(--gray); pointer-events: none; transition: color .2s;
+  display: flex; align-items: center;
+}
+.input-group input {
+  width: 100%; padding: 13px 14px 13px 44px;
+  border: 2px solid var(--border); border-radius: 12px;
+  font-size: 14px; background: var(--white);
+  transition: border-color .2s, box-shadow .2s;
+  box-sizing: border-box;
+}
+.input-group input::placeholder { color: #A0AEC0; }
+.input-group input:focus {
+  outline: none; border-color: var(--orange);
+  box-shadow: 0 0 0 3px rgba(249,115,22,.12);
+}
+.input-group input:focus ~ .input-icon,
+.input-group input:focus + .input-icon { color: var(--orange); }
+.input-group input.input-error-field {
+  border-color: #EF4444;
+  box-shadow: 0 0 0 3px rgba(239,68,68,.1);
+}
+.input-error {
+  font-size: 12px; color: #EF4444; margin-top: 4px; padding-left: 4px;
+  min-height: 0; transition: .2s;
+}
+.input-error:not(:empty) { min-height: 16px; }
+
+/* ── Password row with eye button ────────────────────────────────────────── */
+.pwd-row { display: flex; gap: 6px; align-items: stretch; }
+.pwd-row input { flex: 1; }
+.eye-btn {
+  background: var(--light); border: 2px solid var(--border); border-radius: 12px;
+  padding: 0 12px; cursor: pointer; color: var(--gray);
+  display: flex; align-items: center; justify-content: center;
+  transition: .2s; flex-shrink: 0;
+}
+.eye-btn:hover { border-color: var(--orange); color: var(--orange); }
+
+/* ── Password meter ──────────────────────────────────────────────────────── */
+.pwd-meter {
+  font-size: 12px; font-weight: 600; height: 20px; margin-bottom: 8px;
+  display: flex; align-items: center; gap: 8px;
+}
+.pwd-meter-bar {
+  flex: 1; height: 4px; border-radius: 2px; background: var(--border);
+  overflow: hidden;
+}
+.pwd-meter-fill {
+  height: 100%; border-radius: 2px; transition: width .3s, background .3s;
+}
+
+/* ── Role selector cards ─────────────────────────────────────────────────── */
+.role-selector {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;
+}
+.role-card {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 16px 12px; border: 2px solid var(--border); border-radius: 14px;
+  cursor: pointer; transition: .2s; text-align: center;
+  background: var(--white);
+}
+.role-card:hover { border-color: #FDBA74; background: #FFF7ED; }
+.role-card.active {
+  border-color: var(--orange); background: #FFF7ED;
+  box-shadow: 0 4px 12px rgba(249,115,22,.15);
+}
+.role-card input { display: none; }
+.role-icon {
+  width: 44px; height: 44px; border-radius: 12px;
+  background: var(--light); display: flex; align-items: center; justify-content: center;
+  color: var(--gray); transition: .2s;
+}
+.role-card.active .role-icon {
+  background: var(--orange); color: var(--white);
+}
+.role-name { font-size: 14px; font-weight: 700; color: var(--dark); }
+.role-desc { font-size: 11px; color: var(--gray); }
+
+/* ── Primary button ──────────────────────────────────────────────────────── */
+.btn-primary {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 14px 24px; border: none; border-radius: 12px;
+  background: linear-gradient(135deg, #F97316, #EA580C);
+  color: var(--white); font-size: 15px; font-weight: 700;
+  cursor: pointer; transition: .2s; margin-top: 8px;
+  box-shadow: 0 4px 12px rgba(249,115,22,.3);
+}
+.btn-primary:hover {
+  background: linear-gradient(135deg, #FB923C, #F97316);
+  box-shadow: 0 6px 20px rgba(249,115,22,.4);
+  transform: translateY(-1px);
+}
+.btn-primary:active { transform: translateY(0); }
+.btn-primary:disabled {
+  opacity: .6; cursor: not-allowed; transform: none;
+  box-shadow: none;
+}
+.btn-primary.full { width: 100%; }
+
+/* ── Button spinner ──────────────────────────────────────────────────────── */
+.btn-spinner {
+  width: 18px; height: 18px; border: 2px solid rgba(255,255,255,.3);
+  border-top-color: var(--white); border-radius: 50%;
+  animation: spin .6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.btn-spinner.hidden { display: none; }
+
+/* ── Ghost button ────────────────────────────────────────────────────────── */
+.btn-ghost {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 8px 16px; border: 2px solid var(--border); border-radius: 10px;
+  background: transparent; color: var(--gray); font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: .2s;
+}
+.btn-ghost:hover { border-color: var(--orange); color: var(--orange); }
+.btn-ghost.sm { padding: 6px 12px; font-size: 12px; }
+
+/* ── Link button ─────────────────────────────────────────────────────────── */
+.btn-link {
+  display: block; width: 100%; text-align: center;
+  background: none; border: none; color: var(--orange);
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  padding: 8px 0; transition: .2s;
+}
+.btn-link:hover { color: #EA580C; text-decoration: underline; }
+
+/* ── Forgot password ─────────────────────────────────────────────────────── */
+.forgot-icon {
+  width: 64px; height: 64px; margin: 0 auto 16px;
+  background: var(--light); border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--gray);
+}
+.forgot-desc {
+  text-align: center; font-size: 14px; color: var(--gray);
+  margin: 0 0 20px;
+}
+
+/* ── Specialty grid ──────────────────────────────────────────────────────── */
+.specialty-grid {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;
+}
+.specialty-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 6px 12px; border: 2px solid var(--border); border-radius: 20px;
+  font-size: 12px; font-weight: 600; cursor: pointer; transition: .2s;
+  background: var(--white); color: var(--gray);
+}
+.specialty-chip:hover { border-color: #FDBA74; }
+.specialty-chip input { display: none; }
+.specialty-chip.checked {
+  border-color: var(--orange); background: #FFF7ED; color: var(--orange);
+}
+
+/* ── Pay entry ───────────────────────────────────────────────────────────── */
+.pay-entry { display: flex; gap: 8px; margin-bottom: 6px; }
+.pay-entry .pay-type { max-width: 140px; }
+
+/* ── Field label ─────────────────────────────────────────────────────────── */
+.field-label { font-size: 12px; font-weight: 600; color: var(--gray); margin-top: 2px; margin-bottom: 6px; }
+.field-hint { font-size: 11px; color: #A0AEC0; margin-bottom: 8px; }
+
+/* ── Utility ─────────────────────────────────────────────────────────────── */
+.mt { margin-top: 8px; }
 
 /* ── Dashboard content & app bar ─────────────────────────────────────────── */
 .content { padding: 28px 32px; background: #F1F5F9; }
@@ -1796,8 +1999,15 @@ textarea { resize: vertical; }
     bottom: 0; left: 0; right: 0;
   }
   .auth-modal-backdrop { align-items: flex-end; padding: 0; }
-  .tabs { gap: 4px; margin-bottom: 14px; }
-  .tab { font-size: 14px; padding: 8px 12px; }
+  .auth-modal-card { padding: 16px 16px 24px; }
+  .auth-tabs { gap: 2px; margin-bottom: 16px; }
+  .auth-tab { font-size: 13px; padding: 8px 8px; }
+  .role-selector { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .role-card { padding: 12px 8px; }
+  .role-icon { width: 36px; height: 36px; }
+  .role-name { font-size: 13px; }
+  .role-desc { font-size: 10px; }
+  .btn-primary { padding: 12px 20px; font-size: 14px; }
 
   /* ── Admin header ──────────────────────────────────────────────────────── */
   .adm-header {
