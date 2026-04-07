@@ -111,15 +111,11 @@ async function initSupabase() {
       }
     );
 
-    // Test connection
-    const { error } = await client.from('enterprises').select('id', { count: 'exact', head: true });
-    if (error && error.code !== 'PGRST116') throw new Error(error.message);
-
-    console.log('[DB] Supabase connecté —', process.env.SUPABASE_URL);
+    console.log('[DB] Supabase initialisé —', process.env.SUPABASE_URL);
     supabase = client;
     return client;
   } catch (err) {
-    console.error('[DB] Échec connexion Supabase — fallback JSON local:', err.message);
+    console.error('[DB] Échec init Supabase — fallback JSON local:', err.message);
     return null;
   }
 }
