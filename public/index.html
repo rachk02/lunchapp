@@ -119,92 +119,216 @@
   <div class="auth-modal-card screen-enter">
     <button class="auth-modal-close" onclick="closeAuthModal()">✕</button>
 
-    <div class="tabs">
-      <button class="tab active" id="tab-login" onclick="authTab('login')">Connexion</button>
-      <button class="tab" id="tab-register" onclick="authTab('register')">Inscription</button>
+    <div class="auth-header">
+      <div class="auth-logo">🍽️</div>
+      <h2 class="auth-title">LunchApp</h2>
+    </div>
+
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="tab-login" onclick="authTab('login')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+        Connexion
+      </button>
+      <button class="auth-tab" id="tab-register" onclick="authTab('register')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+        Inscription
+      </button>
     </div>
 
     <!-- Connexion -->
     <div id="pane-login">
-      <div class="field-label">Email <span class="field-label-sep">/</span> Identifiant</div>
-      <div class="field-hint">Entreprises : nom de l'entreprise · Restaurants : nom du restaurant · Employés : votre identifiant</div>
-      <input id="l-id" type="text" placeholder="Email ou identifiant employé"/>
-      <div class="field-label">Mot de passe</div>
-      <div class="pwd-row">
-        <input id="l-pwd" type="password" placeholder="Mot de passe" autocomplete="current-password"/>
-        <button type="button" class="eye-btn" onclick="toggleEye('l-pwd',this)">👁</button>
+      <div class="input-group">
+        <div class="input-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        </div>
+        <input id="l-id" type="text" placeholder="Email ou identifiant" autocomplete="username"/>
+        <div class="input-error" id="err-l-id"></div>
       </div>
-      <button class="btn primary full mt" onclick="doLogin()">Se connecter</button>
-      <button class="btn-link" style="text-align:center;margin-top:4px" onclick="showForgot()">Mot de passe oublié ?</button>
+      <div class="input-group">
+        <div class="input-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        </div>
+        <input id="l-pwd" type="password" placeholder="Mot de passe" autocomplete="current-password"/>
+        <button type="button" class="eye-btn" onclick="toggleEye('l-pwd',this)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+        <div class="input-error" id="err-l-pwd"></div>
+      </div>
+      <button class="btn-primary full" id="btn-login" onclick="doLogin()">
+        <span class="btn-text">Se connecter</span>
+        <span class="btn-spinner hidden"></span>
+      </button>
+      <button class="btn-link" onclick="showForgot()">Mot de passe oublié ?</button>
     </div>
 
     <!-- Mot de passe oublié -->
     <div id="pane-forgot" class="hidden">
-      <p style="font-size:13px;color:var(--gray)">Entrez votre email pour recevoir un lien de réinitialisation.</p>
-      <div class="field-label">Email</div>
-      <input id="forgot-email" type="email" placeholder="votre@email.com"/>
-      <button class="btn primary full mt" onclick="doForgot()">Envoyer le lien</button>
-      <button class="btn-link" style="text-align:center;margin-top:4px" onclick="showLogin()">← Retour à la connexion</button>
+      <div class="forgot-icon">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      </div>
+      <p class="forgot-desc">Entrez votre email pour recevoir un lien de réinitialisation.</p>
+      <div class="input-group">
+        <div class="input-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        </div>
+        <input id="forgot-email" type="email" placeholder="votre@email.com"/>
+        <div class="input-error" id="err-forgot-email"></div>
+      </div>
+      <button class="btn-primary full" id="btn-forgot" onclick="doForgot()">
+        <span class="btn-text">Envoyer le lien</span>
+        <span class="btn-spinner hidden"></span>
+      </button>
+      <button class="btn-link" onclick="showLogin()">← Retour à la connexion</button>
     </div>
 
     <!-- Réinitialisation mot de passe -->
     <div id="pane-reset" class="hidden">
-      <p style="font-size:13px;color:var(--gray)">Choisissez un nouveau mot de passe.</p>
+      <p class="forgot-desc">Choisissez un nouveau mot de passe.</p>
       <input id="reset-token" type="hidden"/>
-      <div class="field-label">Nouveau mot de passe</div>
-      <div class="pwd-row">
+      <div class="input-group">
+        <div class="input-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        </div>
         <input id="reset-pwd" type="password" placeholder="Nouveau mot de passe" autocomplete="new-password" oninput="pwdMeter(this,'m-reset')"/>
-        <button type="button" class="eye-btn" onclick="toggleEye('reset-pwd',this)">👁</button>
+        <button type="button" class="eye-btn" onclick="toggleEye('reset-pwd',this)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+        <div class="input-error" id="err-reset-pwd"></div>
       </div>
       <div id="m-reset" class="pwd-meter"></div>
-      <button class="btn primary full mt" onclick="doResetPassword()">Enregistrer le mot de passe</button>
+      <button class="btn-primary full" id="btn-reset" onclick="doResetPassword()">
+        <span class="btn-text">Enregistrer</span>
+        <span class="btn-spinner hidden"></span>
+      </button>
     </div>
 
     <!-- Inscription -->
     <div id="pane-register" class="hidden">
-      <div class="radio-row">
-        <label><input type="radio" name="rtype" value="enterprise" checked onclick="switchRegType('enterprise')"> Entreprise</label>
-        <label><input type="radio" name="rtype" value="restaurant" onclick="switchRegType('restaurant')"> Restaurant</label>
+      <div class="role-selector">
+        <label class="role-card active" id="role-enterprise" onclick="switchRegType('enterprise')">
+          <input type="radio" name="rtype" value="enterprise" checked>
+          <div class="role-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9h1"/><path d="M9 13h1"/><path d="M9 17h1"/></svg>
+          </div>
+          <span class="role-name">Entreprise</span>
+          <span class="role-desc">Gérez vos employés</span>
+        </label>
+        <label class="role-card" id="role-restaurant" onclick="switchRegType('restaurant')">
+          <input type="radio" name="rtype" value="restaurant">
+          <div class="role-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
+          </div>
+          <span class="role-name">Restaurant</span>
+          <span class="role-desc">Publiez vos menus</span>
+        </label>
       </div>
 
       <!-- Entreprise -->
       <div id="reg-ent">
-        <input id="r-company" type="text" placeholder="Nom de l'entreprise *"/>
-        <input id="r-email" type="email" placeholder="Email *"/>
-        <input id="r-phone" type="tel" placeholder="Téléphone"/>
-        <input id="r-location" type="text" placeholder="Lien Google Maps (https://...)"/>
-        <div class="pwd-row">
+        <div class="input-group">
+          <div class="input-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/></svg>
+          </div>
+          <input id="r-company" type="text" placeholder="Nom de l'entreprise *"/>
+          <div class="input-error" id="err-r-company"></div>
+        </div>
+        <div class="input-group">
+          <div class="input-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          </div>
+          <input id="r-email" type="email" placeholder="Email *"/>
+          <div class="input-error" id="err-r-email"></div>
+        </div>
+        <div class="input-group">
+          <div class="input-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+          </div>
+          <input id="r-phone" type="tel" placeholder="Téléphone"/>
+        </div>
+        <div class="input-group">
+          <div class="input-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          </div>
+          <input id="r-location" type="text" placeholder="Lien Google Maps"/>
+        </div>
+        <div class="input-group">
+          <div class="input-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
           <input id="r-pwd" type="password" placeholder="Mot de passe *" autocomplete="new-password" oninput="pwdMeter(this,'m-ent')"/>
-          <button type="button" class="eye-btn" onclick="toggleEye('r-pwd',this)">👁</button>
+          <button type="button" class="eye-btn" onclick="toggleEye('r-pwd',this)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+          <div class="input-error" id="err-r-pwd"></div>
         </div>
         <div id="m-ent" class="pwd-meter"></div>
-        <button class="btn primary full mt" onclick="doRegister('enterprise')">Créer mon compte</button>
+        <button class="btn-primary full" id="btn-reg-ent" onclick="doRegister('enterprise')">
+          <span class="btn-text">Créer mon compte</span>
+          <span class="btn-spinner hidden"></span>
+        </button>
       </div>
 
       <!-- Restaurant -->
       <div id="reg-rst" class="hidden">
-        <input id="r-rname" type="text" placeholder="Nom du restaurant *"/>
-        <input id="r-owner" type="text" placeholder="Votre nom complet *"/>
-        <input id="r-remail" type="email" placeholder="Email *"/>
-        <input id="r-rphone" type="tel" placeholder="Téléphone"/>
-        <input id="r-addr" type="text" placeholder="Adresse (ex: Ouagadougou, Secteur 51)"/>
-        <div class="field-label">Spécialités (plusieurs possibles)</div>
+        <div class="input-group">
+          <div class="input-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
+          </div>
+          <input id="r-rname" type="text" placeholder="Nom du restaurant *"/>
+          <div class="input-error" id="err-r-rname"></div>
+        </div>
+        <div class="input-group">
+          <div class="input-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          </div>
+          <input id="r-owner" type="text" placeholder="Votre nom complet *"/>
+          <div class="input-error" id="err-r-owner"></div>
+        </div>
+        <div class="input-group">
+          <div class="input-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          </div>
+          <input id="r-remail" type="email" placeholder="Email *"/>
+          <div class="input-error" id="err-r-remail"></div>
+        </div>
+        <div class="input-group">
+          <div class="input-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+          </div>
+          <input id="r-rphone" type="tel" placeholder="Téléphone"/>
+        </div>
+        <div class="input-group">
+          <div class="input-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          </div>
+          <input id="r-addr" type="text" placeholder="Adresse"/>
+        </div>
+        <div class="field-label">Spécialités</div>
         <div id="r-spec-container" class="specialty-grid"></div>
         <script>document.addEventListener('DOMContentLoaded',()=>renderSpecialtyCheckboxes('r-spec-container',[]));</script>
         <div class="field-label">Paiements mobile</div>
         <div id="pay-entries">
           <div class="pay-entry">
-            <select class="pay-type"><option value="">Type de paiement</option><option value="OM">Orange Money</option><option value="Wave">Wave</option><option value="Moov">Moov Money</option><option value="Telecash">Telecash</option></select>
-            <input type="text" class="pay-num" placeholder="Numéro / code agent"/>
+            <select class="pay-type"><option value="">Type</option><option value="OM">Orange Money</option><option value="Wave">Wave</option><option value="Moov">Moov Money</option><option value="Telecash">Telecash</option></select>
+            <input type="text" class="pay-num" placeholder="Numéro"/>
           </div>
         </div>
-        <button class="btn ghost sm" onclick="addPayEntry('pay-entries')">+ Ajouter un type de paiement</button>
-        <div class="pwd-row mt">
+        <button class="btn-ghost sm" onclick="addPayEntry('pay-entries')">+ Ajouter un paiement</button>
+        <div class="input-group mt">
+          <div class="input-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
           <input id="r-rpwd" type="password" placeholder="Mot de passe *" autocomplete="new-password" oninput="pwdMeter(this,'m-rst')"/>
-          <button type="button" class="eye-btn" onclick="toggleEye('r-rpwd',this)">👁</button>
+          <button type="button" class="eye-btn" onclick="toggleEye('r-rpwd',this)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+          <div class="input-error" id="err-r-rpwd"></div>
         </div>
         <div id="m-rst" class="pwd-meter"></div>
-        <button class="btn primary full mt" onclick="doRegister('restaurant')">Créer mon restaurant</button>
+        <button class="btn-primary full" id="btn-reg-rst" onclick="doRegister('restaurant')">
+          <span class="btn-text">Créer mon restaurant</span>
+          <span class="btn-spinner hidden"></span>
+        </button>
       </div>
     </div>
 
