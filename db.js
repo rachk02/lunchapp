@@ -1,10 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// db.js — Couche d'accès aux données (PostgreSQL/Supabase ou JSON fichiers)
+// db.js — Couche d'accès aux données (Supabase ou JSON fichiers)
 // ═══════════════════════════════════════════════════════════════════════════
-// Si DATABASE_URL est défini → PostgreSQL (Supabase) avec pool de connexions
+// Si SUPABASE_URL est défini → Supabase via @supabase/supabase-js
 // Sinon                      → JSON fichiers locaux (développement local)
 //
-// API : db.<entity>.find(), .create(), .update(), .delete(), .upsert()
+// API : db.<entity>.find(), .findOne(), .create(), .update(), .delete()
+//       + query() / raw() pour requêtes SQL brutes
 //       + legacy read(key) / write(key) pour compatibilité
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -32,7 +33,7 @@ const FILES = {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// JSON Adapter (développement local)
+// JSON Adapter (développement local / tests)
 // ═══════════════════════════════════════════════════════════════════════════
 const DB_DIR = process.env.DB_DIR || path.join(__dirname, 'data');
 if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
@@ -49,9 +50,9 @@ const jsonAdapter = {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PostgreSQL Adapter (Supabase)
+// Supabase Adapter
 // ═══════════════════════════════════════════════════════════════════════════
-let pgPool = null;
+let supabase = null;
 
 const TABLE_MAP = {
   enterprises:      'enterprises',
@@ -88,7 +89,6 @@ function camelCase(row) {
   const out = {};
   for (const [k, v] of Object.entries(row)) {
     const camel = k.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-    // Parse JSONB columns
     if (typeof v === 'string' && (v.startsWith('[') || v.startsWith('{'))) {
       try { out[camel] = JSON.parse(v); continue; } catch {}
     }
@@ -97,101 +97,97 @@ function camelCase(row) {
   return out;
 }
 
-async function initPg() {
-  if (!process.env.DATABASE_URL) return null;
+async function initSupabase() {
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) return null;
 
   try {
-    const { Pool } = require('pg');
+    const { createClient } = require('@supabase/supabase-js');
 
-    // Parse DATABASE_URL manually to handle special chars in password
-    const raw      = process.env.DATABASE_URL.replace(/^postgresql?:\/\//, '');
-    const atIdx    = raw.lastIndexOf('@');
-    const creds    = raw.substring(0, atIdx);
-    const hostPart = raw.substring(atIdx + 1);
-    const colonIdx = creds.indexOf(':');
-    const safeDecode = s => { try { return decodeURIComponent(s); } catch { return s; } };
-    const dbUser   = safeDecode(creds.substring(0, colonIdx));
-    const dbPass   = safeDecode(creds.substring(colonIdx + 1));
-    const slashIdx = hostPart.indexOf('/');
-    const hostPort = hostPart.substring(0, slashIdx);
-    const dbName   = hostPart.substring(slashIdx + 1).split('?')[0];
-    const [dbHost, dbPortStr] = hostPort.split(':');
-    const dbPort   = parseInt(dbPortStr, 10) || 5432;
+    const client = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_KEY,
+      {
+        auth: { autoRefreshToken: false, persistSession: false },
+      }
+    );
 
-    const useSSL = dbHost.includes('supabase') || process.env.DB_SSL === 'true';
+    // Test connection
+    const { error } = await client.from('enterprises').select('id', { count: 'exact', head: true });
+    if (error && error.code !== 'PGRST116') throw new Error(error.message);
 
-    const pool = new Pool({
-      host:                    dbHost,
-      port:                    dbPort,
-      database:                dbName,
-      user:                    dbUser,
-      password:                dbPass,
-      ssl:                     useSSL ? { rejectUnauthorized: false } : false,
-      connectionTimeoutMillis: 8000,
-      idleTimeoutMillis:       30000,
-      max:                     3,
-    });
-
-    await pool.query('SELECT 1');
-    console.log('[DB] PostgreSQL (Supabase) connecté —', dbHost);
-
-    pgPool = pool;
-    return pool;
+    console.log('[DB] Supabase connecté —', process.env.SUPABASE_URL);
+    supabase = client;
+    return client;
   } catch (err) {
-    console.error('[DB] Échec connexion PostgreSQL — fallback JSON local:', err.message);
+    console.error('[DB] Échec connexion Supabase — fallback JSON local:', err.message);
     return null;
   }
 }
 
-const _ready = initPg();
+const _ready = initSupabase();
 
-// ── Generic entity CRUD for PostgreSQL ─────────────────────────────────────
+// ── Generic entity CRUD for Supabase ─────────────────────────────────────
 function createEntity(entityName) {
   return {
     async find(where = {}) {
-      if (pgPool) {
+      if (supabase) {
         const table = TABLE_MAP[entityName];
         if (!table) throw new Error(`Unknown entity: ${entityName}`);
+        let q = supabase.from(table).select('*');
+
         const keys = Object.keys(where);
-        let sql = `SELECT * FROM ${table}`;
-        const values = [];
-        if (keys.length) {
-          const clauses = keys.map((k, i) => {
-            const col = k.replace(/([A-Z])/g, '_$1').toLowerCase();
-            const val = where[k];
-            if (val === null || val === undefined) return `${col} IS NULL`;
-            values.push(val);
-            return `${col} = $${values.length}`;
-          });
-          sql += ` WHERE ${clauses.join(' AND ')}`;
+        for (const k of keys) {
+          const col = k.replace(/([A-Z])/g, '_$1').toLowerCase();
+          const val = where[k];
+          if (val === null || val === undefined) q = q.is(col, null);
+          else q = q.eq(col, val);
         }
-        sql += ` ORDER BY created_at DESC`;
-        const { rows } = await pgPool.query(sql, values);
-        return rows.map(camelCase);
+
+        q = q.order('created_at', { ascending: false });
+        const { data, error } = await q;
+        if (error) throw new Error(error.message);
+        return (data || []).map(camelCase);
       }
-      // Fallback: use legacy read
       return jsonAdapter.read(entityName).filter(item =>
         Object.entries(where).every(([k, v]) => item[k] === v)
       );
     },
 
     async findOne(where = {}) {
-      const results = await this.find(where);
+      if (supabase) {
+        const table = TABLE_MAP[entityName];
+        if (!table) throw new Error(`Unknown entity: ${entityName}`);
+        let q = supabase.from(table).select('*').limit(1);
+
+        const keys = Object.keys(where);
+        for (const k of keys) {
+          const col = k.replace(/([A-Z])/g, '_$1').toLowerCase();
+          const val = where[k];
+          if (val === null || val === undefined) q = q.is(col, null);
+          else q = q.eq(col, val);
+        }
+
+        const { data, error } = await q;
+        if (error) throw new Error(error.message);
+        return data && data.length ? camelCase(data[0]) : null;
+      }
+      const results = jsonAdapter.read(entityName).filter(item =>
+        Object.entries(where).every(([k, v]) => item[k] === v)
+      );
       return results[0] || null;
     },
 
     async create(data) {
-      if (pgPool) {
+      if (supabase) {
         const table = TABLE_MAP[entityName];
-        const cols = Object.keys(data);
         const snake = snakeCase(data);
-        const values = Object.values(snake);
-        const colNames = cols.map(c => c.replace(/([A-Z])/g, '_$1').toLowerCase());
-        const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
-
-        const sql = `INSERT INTO ${table} (${colNames.join(', ')}) VALUES (${placeholders}) RETURNING *`;
-        const { rows } = await pgPool.query(sql, values);
-        return camelCase(rows[0]);
+        const { data: result, error } = await supabase
+          .from(table)
+          .insert(snake)
+          .select()
+          .single();
+        if (error) throw new Error(error.message);
+        return camelCase(result);
       }
       const list = jsonAdapter.read(entityName);
       list.push(data);
@@ -200,25 +196,22 @@ function createEntity(entityName) {
     },
 
     async update(where, data) {
-      if (pgPool) {
+      if (supabase) {
         const table = TABLE_MAP[entityName];
-        const whereKeys = Object.keys(where);
-        const dataKeys = Object.keys(data);
         const snakeData = snakeCase(data);
+        let q = supabase.from(table).update(snakeData).select();
 
-        const setClauses = dataKeys.map((k, i) => {
+        const keys = Object.keys(where);
+        for (const k of keys) {
           const col = k.replace(/([A-Z])/g, '_$1').toLowerCase();
-          return `${col} = $${i + 1}`;
-        });
-        const whereClauses = whereKeys.map((k, i) => {
-          const col = k.replace(/([A-Z])/g, '_$1').toLowerCase();
-          return `${col} = $${setClauses.length + i + 1}`;
-        });
+          const val = where[k];
+          if (val === null || val === undefined) q = q.is(col, null);
+          else q = q.eq(col, val);
+        }
 
-        const values = [...Object.values(snakeData), ...whereKeys.map(k => where[k])];
-        const sql = `UPDATE ${table} SET ${setClauses.join(', ')} WHERE ${whereClauses.join(' AND ')} RETURNING *`;
-        const { rows } = await pgPool.query(sql, values);
-        return rows.length ? camelCase(rows[0]) : null;
+        const { data: result, error } = await q;
+        if (error) throw new Error(error.message);
+        return result && result.length ? camelCase(result[0]) : null;
       }
       const list = jsonAdapter.read(entityName);
       const idx = list.findIndex(item =>
@@ -231,16 +224,21 @@ function createEntity(entityName) {
     },
 
     async delete(where) {
-      if (pgPool) {
+      if (supabase) {
         const table = TABLE_MAP[entityName];
+        let q = supabase.from(table).delete().select();
+
         const keys = Object.keys(where);
-        const clauses = keys.map((k, i) => {
+        for (const k of keys) {
           const col = k.replace(/([A-Z])/g, '_$1').toLowerCase();
-          return `${col} = $${i + 1}`;
-        });
-        const sql = `DELETE FROM ${table} WHERE ${clauses.join(' AND ')} RETURNING *`;
-        const { rows } = await pgPool.query(sql, keys.map(k => where[k]));
-        return rows.length ? camelCase(rows[0]) : null;
+          const val = where[k];
+          if (val === null || val === undefined) q = q.is(col, null);
+          else q = q.eq(col, val);
+        }
+
+        const { data, error } = await q;
+        if (error) throw new Error(error.message);
+        return data && data.length ? camelCase(data[0]) : null;
       }
       const list = jsonAdapter.read(entityName);
       const idx = list.findIndex(item =>
@@ -253,13 +251,21 @@ function createEntity(entityName) {
     },
 
     async deleteMany(where) {
-      if (pgPool) {
+      if (supabase) {
         const table = TABLE_MAP[entityName];
+        let q = supabase.from(table).delete();
+
         const keys = Object.keys(where);
-        const clauses = keys.map((k, i) => `${k.replace(/([A-Z])/g, '_$1').toLowerCase()} = $${i + 1}`);
-        const sql = `DELETE FROM ${table} WHERE ${clauses.join(' AND ')}`;
-        const { rowCount } = await pgPool.query(sql, keys.map(k => where[k]));
-        return rowCount;
+        for (const k of keys) {
+          const col = k.replace(/([A-Z])/g, '_$1').toLowerCase();
+          const val = where[k];
+          if (val === null || val === undefined) q = q.is(col, null);
+          else q = q.eq(col, val);
+        }
+
+        const { count, error } = await q;
+        if (error) throw new Error(error.message);
+        return count || 0;
       }
       const before = jsonAdapter.read(entityName).length;
       const list = jsonAdapter.read(entityName).filter(item =>
@@ -270,19 +276,84 @@ function createEntity(entityName) {
     },
 
     async query(sql, params = []) {
-      if (pgPool) {
-        const { rows } = await pgPool.query(sql, params);
-        return rows.map(camelCase);
+      if (supabase) {
+        // Supabase JS doesn't support raw SQL — convert common patterns
+        // DELETE FROM table WHERE col = $1 AND col2 != $2
+        const delMatch = sql.match(/^DELETE FROM (\w+) WHERE (.+)$/i);
+        if (delMatch) {
+          const table = delMatch[1];
+          const tableEntity = Object.entries(TABLE_MAP).find(([, t]) => t === table)?.[0];
+          if (!tableEntity) throw new Error(`Unknown table: ${table}`);
+          const entity = createEntity(tableEntity);
+
+          // Parse WHERE conditions
+          const conditions = delMatch[2].split(/\s+AND\s+/i);
+          let q = supabase.from(table).delete();
+          for (const cond of conditions) {
+            const m = cond.match(/(\w+)\s*([=!<>]+)\s*\$(\d+)/);
+            if (!m) continue;
+            const col = m[1];
+            const op = m[2];
+            const val = params[parseInt(m[3]) - 1];
+            if (op === '=') q = q.eq(col, val);
+            else if (op === '!=') q = q.neq(col, val);
+          }
+          const { data, error } = await q;
+          if (error) throw new Error(error.message);
+          return (data || []).map(camelCase);
+        }
+
+        // UPDATE table SET col = $1 WHERE col2 = $2
+        const updMatch = sql.match(/^UPDATE (\w+) SET (.+?) WHERE (.+)$/i);
+        if (updMatch) {
+          const table = updMatch[1];
+          const tableEntity = Object.entries(TABLE_MAP).find(([, t]) => t === table)?.[0];
+          if (!tableEntity) throw new Error(`Unknown table: ${table}`);
+          const entity = createEntity(tableEntity);
+
+          // Parse SET
+          const setParts = updMatch[2].split(/\s*,\s*/);
+          const updates = {};
+          for (const part of setParts) {
+            const m = part.match(/(\w+)\s*=\s*(.+)$/);
+            if (!m) continue;
+            const col = m[1];
+            let val = m[2].trim();
+            if (val === 'NOW()') val = new Date().toISOString();
+            else if (val === 'true') val = true;
+            else if (val === 'false') val = false;
+            else if (val.startsWith("'")) val = val.slice(1, -1);
+            else {
+              const pm = val.match(/\$(\d+)/);
+              if (pm) val = params[parseInt(pm[1]) - 1];
+            }
+            const camelCol = col.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+            updates[camelCol] = val;
+          }
+
+          // Parse WHERE
+          const whereParts = updMatch[3].split(/\s+AND\s+/i);
+          let q = supabase.from(table).update(snakeCase(updates));
+          for (const cond of whereParts) {
+            const m = cond.match(/(\w+)\s*=\s*\$(\d+)/);
+            if (!m) continue;
+            const col = m[1];
+            const val = params[parseInt(m[2]) - 1];
+            q = q.eq(col, val);
+          }
+
+          const { data, error } = await q;
+          if (error) throw new Error(error.message);
+          return (data || []).map(camelCase);
+        }
+
+        throw new Error(`Unsupported raw SQL query: ${sql}`);
       }
       throw new Error('query() not available in JSON mode');
     },
 
-    async rawQuery(sql, params = []) {
-      if (pgPool) {
-        const { rows } = await pgPool.query(sql, params);
-        return rows;
-      }
-      throw new Error('rawQuery() not available in JSON mode');
+    async raw(sql, params = []) {
+      return this.query(sql, params);
     },
   };
 }
@@ -290,8 +361,8 @@ function createEntity(entityName) {
 // ── Export ─────────────────────────────────────────────────────────────────
 const db = {
   _ready,
-  _isPg: () => pgPool !== null,
-  _pool: () => pgPool,
+  _isSupabase: () => supabase !== null,
+  _client: () => supabase,
 
   // Entities
   enterprises:      createEntity('enterprises'),
