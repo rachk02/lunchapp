@@ -135,11 +135,8 @@ function pwdMeter(input, meterId) {
   const labels = ['', 'Faible', 'Moyen', 'Bon', 'Fort'];
   const colors = ['', '#EF4444', '#F97316', '#0EA5E9', '#22C55E'];
   const m = el(meterId);
-  if (!m) return;
-  m.innerHTML = score
-    ? `<span style="color:${colors[score]}">${labels[score]}</span>
-       <span class="pwd-meter-bar"><span class="pwd-meter-fill" style="width:${score*25}%;background:${colors[score]}"></span></span>`
-    : '';
+  m.textContent = score ? labels[score] : '';
+  m.style.color = colors[score] || '';
 }
 
 // ─── Pay entries ──────────────────────────────────────────────────────────────
@@ -208,7 +205,6 @@ function authTab(tab) {
   el('pane-reset').classList.add('hidden');
   el('tab-login').classList.toggle('active', tab === 'login');
   el('tab-register').classList.toggle('active', tab === 'register');
-  clearAuthErrors();
 }
 
 function showForgot() {
@@ -223,39 +219,30 @@ function showLogin() {
 }
 
 async function doForgot() {
-  clearAuthErrors();
   const email = el('forgot-email').value.trim();
-  if (!email) { showFieldError('forgot-email', 'Email requis'); return; }
+  if (!email) { toast('Entrez votre email', 'error'); return; }
   try {
-    setBtnLoading('btn-forgot', true);
     const d = await api('POST', '/api/auth/forgot-password', { email });
     toast(d.message, 'success');
     el('forgot-email').value = '';
     setTimeout(showLogin, 2500);
   } catch (e) { toast(e.message, 'error'); }
-  finally { setBtnLoading('btn-forgot', false); }
 }
 
 async function doResetPassword() {
-  clearAuthErrors();
   const token   = el('reset-token').value;
   const newPwd  = el('reset-pwd').value;
-  if (!newPwd) { showFieldError('reset-pwd', 'Mot de passe requis'); return; }
+  if (!newPwd) { toast('Entrez un nouveau mot de passe', 'error'); return; }
   try {
-    setBtnLoading('btn-reset', true);
     const d = await api('POST', '/api/auth/reset-password', { token, newPassword: newPwd });
     toast(d.message, 'success');
     history.replaceState({}, '', '/');
     setTimeout(showLogin, 1500);
   } catch (e) { toast(e.message, 'error'); }
-  finally { setBtnLoading('btn-reset', false); }
 }
 function switchRegType(type) {
   el('reg-ent').classList.toggle('hidden', type !== 'enterprise');
   el('reg-rst').classList.toggle('hidden', type !== 'restaurant');
-  el('role-enterprise').classList.toggle('active', type === 'enterprise');
-  el('role-restaurant').classList.toggle('active', type === 'restaurant');
-  clearAuthErrors();
 }
 
 // ─── Panes ────────────────────────────────────────────────────────────────────
@@ -366,73 +353,29 @@ function buildSidebar(role) {
 }
 
 // ─── Login / Register / Logout ────────────────────────────────────────────────
-function clearAuthErrors() {
-  document.querySelectorAll('.input-error').forEach(e => e.textContent = '');
-  document.querySelectorAll('.input-error-field').forEach(e => e.classList.remove('input-error-field'));
-}
-function showFieldError(fieldId, msg) {
-  const errEl = el('err-' + fieldId);
-  if (errEl) errEl.textContent = msg;
-  const inputEl = el(fieldId);
-  if (inputEl) inputEl.classList.add('input-error-field');
-}
-function setBtnLoading(btnId, loading) {
-  const btn = el(btnId);
-  if (!btn) return;
-  const text = btn.querySelector('.btn-text');
-  const spinner = btn.querySelector('.btn-spinner');
-  if (loading) {
-    btn.disabled = true;
-    if (text) text.textContent = 'Chargement...';
-    if (spinner) spinner.classList.remove('hidden');
-  } else {
-    btn.disabled = false;
-    if (spinner) spinner.classList.add('hidden');
-  }
-}
-
 async function doLogin() {
-  clearAuthErrors();
-  const emailId = 'l-id';
-  const pwdId = 'l-pwd';
-  const email = el(emailId).value.trim();
-  const pwd   = el(pwdId).value;
-  let valid = true;
-  if (!email) { showFieldError(emailId, 'Ce champ est requis'); valid = false; }
-  if (!pwd)   { showFieldError(pwdId, 'Ce champ est requis'); valid = false; }
-  if (!valid) return;
+  const email = el('l-id').value.trim();
+  const pwd   = el('l-pwd').value;
+  if (!email || !pwd) { toast('Remplissez tous les champs', 'error'); return; }
   try {
-    setBtnLoading('btn-login', true);
     const d = await api('POST', '/api/login', { email, password: pwd });
     token = d.token;
     me    = d.user;
     localStorage.setItem('la_token', token);
     localStorage.setItem('la_user', JSON.stringify(me));
     startApp();
-  } catch (e) {
-    toast(e.message, 'error');
-    showFieldError(emailId, 'Identifiants incorrects');
-  } finally {
-    setBtnLoading('btn-login', false);
-  }
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 async function doRegister(type) {
-  clearAuthErrors();
-  let valid = true;
   try {
-    setBtnLoading(type === 'enterprise' ? 'btn-reg-ent' : 'btn-reg-rst', true);
     let d;
     if (type === 'enterprise') {
       const companyName = el('r-company').value.trim();
-      const email       = el('r-email').value.trim();
-      const phone       = el('r-phone').value.trim();
-      const location    = el('r-location').value.trim();
-      const password    = el('r-pwd').value;
-      if (!companyName) { showFieldError('r-company', 'Nom requis'); valid = false; }
-      if (!email)       { showFieldError('r-email', 'Email requis'); valid = false; }
-      if (!password)    { showFieldError('r-pwd', 'Mot de passe requis'); valid = false; }
-      if (!valid) return;
+      const email    = el('r-email').value.trim();
+      const phone    = el('r-phone').value.trim();
+      const location = el('r-location').value.trim();
+      const password = el('r-pwd').value;
       d = await api('POST', '/api/enterprise/register', { companyName, email, phone, location, password });
     } else {
       const restaurantName = el('r-rname').value.trim();
@@ -443,11 +386,6 @@ async function doRegister(type) {
       const specialty      = collectSpecialties('r-spec-container');
       const paymentInfo    = collectPayEntries('pay-entries');
       const password       = el('r-rpwd').value;
-      if (!restaurantName) { showFieldError('r-rname', 'Nom requis'); valid = false; }
-      if (!fullName)       { showFieldError('r-owner', 'Nom requis'); valid = false; }
-      if (!email)          { showFieldError('r-remail', 'Email requis'); valid = false; }
-      if (!password)       { showFieldError('r-rpwd', 'Mot de passe requis'); valid = false; }
-      if (!valid) return;
       d = await api('POST', '/api/restauratrice/register', { restaurantName, fullName, email, phone, address, specialty, paymentInfo, password });
     }
     token = d.token;
@@ -456,11 +394,7 @@ async function doRegister(type) {
     localStorage.setItem('la_user', JSON.stringify(me));
     toast('Compte créé avec succès !', 'success');
     startApp();
-  } catch (e) {
-    toast(e.message, 'error');
-  } finally {
-    setBtnLoading(type === 'enterprise' ? 'btn-reg-ent' : 'btn-reg-rst', false);
-  }
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 function doLogout() {
