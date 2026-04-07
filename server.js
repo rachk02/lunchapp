@@ -62,11 +62,11 @@ async function sendCredentialsEmail({ to, firstName, employeeId, password, enter
         <p style="margin:0 0 10px"><span style="color:#64748B;font-size:12px;text-transform:uppercase;font-weight:600;letter-spacing:.05em">Mot de passe</span><br/>
           <strong style="font-family:monospace;font-size:18px;color:#1E293B">${password}</strong></p>
         <p style="margin:0"><span style="color:#64748B;font-size:12px;text-transform:uppercase;font-weight:600;letter-spacing:.05em">Lien de connexion</span><br/>
-          <a href="${APP_URL}" style="font-family:monospace;font-size:15px;color:#0EA5E9">${APP_URL.replace(/^https?:\/\//, '')}</a></p>
+          <a href="${APP_URL}" target="_blank" style="font-family:monospace;font-size:15px;color:#0EA5E9;text-decoration:underline">${APP_URL.replace(/^https?:\/\//, '')}</a></p>
       </div>
       <p style="color:#475569">Connectez-vous sur l'application et changez votre mot de passe depuis votre profil.</p>
       <div style="margin:24px 0;text-align:center">
-        <a href="${APP_URL}" style="background:#F97316;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold">
+        <a href="${APP_URL}" target="_blank" style="background:#F97316;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block">
           Se connecter à LunchApp
         </a>
       </div>
@@ -76,12 +76,18 @@ async function sendCredentialsEmail({ to, firstName, employeeId, password, enter
       © ${new Date().getFullYear()} LunchApp — Tous droits réservés
     </div>
   </div>`;
+  const text = `Bonjour ${firstName} — Votre compte employé chez ${enterpriseName} a été créé sur LunchApp.
+Identifiant : ${employeeId}
+Mot de passe : ${password}
+Lien de connexion : ${APP_URL}
+Connectez-vous et changez votre mot de passe depuis votre profil.`;
   try {
     await mailer.sendMail({
       from:    process.env.MAIL_FROM || 'LunchApp <noreply@lunchapp.com>',
       to,
       subject: `🔑 Vos identifiants LunchApp — ${enterpriseName}`,
       html,
+      text,
     });
     console.log(`[Mail] Identifiants envoyés → ${to}`);
   } catch (e) {
@@ -115,7 +121,7 @@ async function sendWelcomeEmail({ to, name, role }) {
         `}
       </ul>
       <div style="margin:24px 0;text-align:center">
-        <a href="${APP_URL}" style="background:#F97316;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold">
+        <a href="${APP_URL}" target="_blank" style="background:#F97316;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block">
           Accéder à LunchApp
         </a>
       </div>
@@ -127,6 +133,7 @@ async function sendWelcomeEmail({ to, name, role }) {
       © ${new Date().getFullYear()} LunchApp — Tous droits réservés
     </div>
   </div>`;
+  const text = `Félicitations pour votre inscription, ${name} ! Bienvenue sur LunchApp en tant que ${roleLabel}. Accédez à l'application : ${APP_URL}`;
 
   try {
     await mailer.sendMail({
@@ -134,6 +141,7 @@ async function sendWelcomeEmail({ to, name, role }) {
       to,
       subject: `🎉 Félicitations pour votre inscription sur LunchApp !`,
       html,
+      text,
     });
   } catch (err) {
     console.error('[Mailer] Échec envoi email à', to, ':', err.message);
@@ -388,7 +396,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       <p>Bonjour <strong>${found.companyName || found.restaurantName}</strong>,</p>
       <p>Vous avez demandé la réinitialisation de votre mot de passe. Cliquez sur le bouton ci-dessous :</p>
       <div style="margin:24px 0;text-align:center">
-        <a href="${resetLink}" style="background:#F97316;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold">
+        <a href="${resetLink}" target="_blank" style="background:#F97316;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block">
           Réinitialiser mon mot de passe
         </a>
       </div>
@@ -399,6 +407,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       © ${new Date().getFullYear()} LunchApp — Tous droits réservés
     </div>
   </div>`;
+  const text = `Réinitialisation du mot de passe — Bonjour ${found.companyName || found.restaurantName}, cliquez sur ce lien pour réinitialiser votre mot de passe : ${resetLink} (expire dans 30 minutes)`;
 
   try {
     await mailer.sendMail({
@@ -406,6 +415,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       to:      found.email,
       subject: '🔑 Réinitialisation de votre mot de passe LunchApp',
       html,
+      text,
     });
   } catch (err) {
     console.error('[Mailer] Échec reset email :', err.message);

@@ -144,7 +144,28 @@ CREATE INDEX IF NOT EXISTS idx_choices_restaurant  ON choices (restaurant_id);
 CREATE INDEX IF NOT EXISTS idx_choices_date        ON choices (date);
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 9. COMMANDES (orders)
+-- 9. ABONNEMENTS (avant orders car orders référence subscriptions)
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id              TEXT        PRIMARY KEY,
+  enterprise_id   TEXT        NOT NULL REFERENCES enterprises (id) ON DELETE CASCADE,
+  enterprise_name TEXT        NOT NULL,
+  restaurant_id   TEXT        NOT NULL REFERENCES restaurants (id) ON DELETE CASCADE,
+  restaurant_name TEXT        NOT NULL,
+  frequency       TEXT        NOT NULL
+                    CHECK (frequency IN ('daily','weekly','monthly','quarterly','semi-annual','annual')),
+  status          TEXT        NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'accepted', 'declined', 'cancelled')),
+  accepted_at     TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ,
+  UNIQUE (enterprise_id, restaurant_id)
+);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_enterprise ON subscriptions (enterprise_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_restaurant ON subscriptions (restaurant_id);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 10. COMMANDES (orders)
 -- items : JSONB [{employeeId, employeeName, foodItem, drinkItem, amount}]
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS orders (
@@ -170,27 +191,6 @@ CREATE INDEX IF NOT EXISTS idx_orders_enterprise ON orders (enterprise_id);
 CREATE INDEX IF NOT EXISTS idx_orders_restaurant ON orders (restaurant_id);
 CREATE INDEX IF NOT EXISTS idx_orders_date       ON orders (date);
 CREATE INDEX IF NOT EXISTS idx_orders_status     ON orders (status);
-
--- ─────────────────────────────────────────────────────────────────────────────
--- 10. ABONNEMENTS
--- ─────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS subscriptions (
-  id              TEXT        PRIMARY KEY,
-  enterprise_id   TEXT        NOT NULL REFERENCES enterprises (id) ON DELETE CASCADE,
-  enterprise_name TEXT        NOT NULL,
-  restaurant_id   TEXT        NOT NULL REFERENCES restaurants (id) ON DELETE CASCADE,
-  restaurant_name TEXT        NOT NULL,
-  frequency       TEXT        NOT NULL
-                    CHECK (frequency IN ('daily','weekly','monthly','quarterly','semi-annual','annual')),
-  status          TEXT        NOT NULL DEFAULT 'pending'
-                    CHECK (status IN ('pending', 'accepted', 'declined', 'cancelled')),
-  accepted_at     TIMESTAMPTZ,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at      TIMESTAMPTZ,
-  UNIQUE (enterprise_id, restaurant_id)
-);
-CREATE INDEX IF NOT EXISTS idx_subscriptions_enterprise ON subscriptions (enterprise_id);
-CREATE INDEX IF NOT EXISTS idx_subscriptions_restaurant ON subscriptions (restaurant_id);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 11. FACTURES
