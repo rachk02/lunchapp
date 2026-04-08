@@ -455,7 +455,7 @@ app.post('/api/enterprise/register', async (req, res) => {
   if (!companyName || !email || !password) return res.status(400).json({ error: 'Champs requis' });
   if (!validatePassword(password)) return res.status(400).json({ error: 'Mot de passe trop faible (8 car. min, maj, min, chiffre, spécial)' });
 
-  if (await db.enterprises.find().some(e => e.companyName?.toLowerCase() === companyName.trim().toLowerCase()))
+  if ((await db.enterprises.find()).some(e => e.companyName?.toLowerCase() === companyName.trim().toLowerCase()))
     return res.status(409).json({ error: 'Ce nom d\'entreprise est déjà utilisé' });
   if (await db.enterprises.findOne({ email: email.toLowerCase() }))
     return res.status(409).json({ error: 'Email déjà utilisé' });
@@ -481,7 +481,7 @@ app.post('/api/restauratrice/register', async (req, res) => {
   if (!restaurantName || !fullName || !email || !password) return res.status(400).json({ error: 'Champs requis' });
   if (!validatePassword(password)) return res.status(400).json({ error: 'Mot de passe trop faible' });
 
-  if (await db.restaurants.find().some(r => r.restaurantName?.toLowerCase() === restaurantName.trim().toLowerCase()))
+  if ((await db.restaurants.find()).some(r => r.restaurantName?.toLowerCase() === restaurantName.trim().toLowerCase()))
     return res.status(409).json({ error: 'Ce nom de restaurant est déjà utilisé' });
   if (await db.restaurants.findOne({ email: email.toLowerCase() }))
     return res.status(409).json({ error: 'Email déjà utilisé' });
@@ -511,7 +511,7 @@ app.post('/api/restauratrice/register', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 app.get('/api/restaurants', auth, async (req, res) => {
-  const restaurants = await db.restaurants.find().map(({ password, ...r }) => r);
+  const restaurants = (await db.restaurants.find()).map(({ password, ...r }) => r);
   res.json(restaurants);
 });
 
@@ -709,7 +709,7 @@ app.delete('/api/enterprise/restaurants/:restaurantId/affiliate', auth, requireR
 
 app.get('/api/enterprise/restaurants', auth, requireRole('enterprise'), async (req, res) => {
   const affiliations = await db.affiliations.find({ enterpriseId: req.user.id });
-  const restaurants  = await db.restaurants.find().map(({ password, ...r }) => r);
+  const restaurants  = (await db.restaurants.find()).map(({ password, ...r }) => r);
   const menus        = await db.menus.find();
 
   const result = affiliations.map(a => {
@@ -753,7 +753,7 @@ app.delete('/api/restaurant/enterprises/:enterpriseId/offer', auth, requireRole(
 
 app.get('/api/restaurant/clientele', auth, requireRole('restauratrice'), async (req, res) => {
   const affiliations = await db.affiliations.find({ restaurantId: req.user.id });
-  const enterprises  = await db.enterprises.find().map(({ password, ...e }) => e);
+  const enterprises  = (await db.enterprises.find()).map(({ password, ...e }) => e);
   const t            = todayStr();
   const choices      = await db.choices.find({ restaurantId: req.user.id, date: t });
 
@@ -767,7 +767,7 @@ app.get('/api/restaurant/clientele', auth, requireRole('restauratrice'), async (
 });
 
 app.get('/api/restaurant/enterprises', auth, requireRole('restauratrice'), async (req, res) => {
-  const enterprises  = await db.enterprises.find().map(({ password, ...e }) => e);
+  const enterprises  = (await db.enterprises.find()).map(({ password, ...e }) => e);
   const affiliations = await db.affiliations.find({ restaurantId: req.user.id });
   const offers       = await db.offers.find({ restaurantId: req.user.id });
 
@@ -806,7 +806,7 @@ app.post('/api/enterprise/employees', auth, requireRole('enterprise'), async (re
   });
   if (dup) return res.status(409).json({ error: 'Un employé avec ce nom existe déjà' });
 
-  if (await db.employees.find().some(e => e.employeeId === customId)) return res.status(409).json({ error: 'Cet ID employé est déjà utilisé' });
+  if ((await db.employees.find()).some(e => e.employeeId === customId)) return res.status(409).json({ error: 'Cet ID employé est déjà utilisé' });
 
   const hashed = await bcrypt.hash(finalPassword, 10);
   const employeeId = customId;
@@ -842,7 +842,7 @@ app.put('/api/enterprise/employees/:id', auth, requireRole('enterprise'), async 
   if (whatsapp !== undefined) updates.whatsapp = whatsapp;
   if (newEmpId) {
     if (!/^[A-Za-z][A-Za-z0-9._-]{2,29}$/.test(String(newEmpId))) return res.status(400).json({ error: 'ID employé invalide — commence par une lettre, 3 à 30 caractères' });
-    const clash = await db.employees.find().find((e, i) => e.id !== req.params.id && e.employeeId === newEmpId);
+    const clash = (await db.employees.find()).find((e, i) => e.id !== req.params.id && e.employeeId === newEmpId);
     if (clash) return res.status(409).json({ error: 'Cet ID employé est déjà utilisé' });
     updates.employeeId = newEmpId;
   }
@@ -894,7 +894,7 @@ app.put('/api/employee/me', auth, requireRole('employee'), async (req, res) => {
 
 app.get('/api/employee/menus', auth, requireRole('employee'), async (req, res) => {
   const affiliations = await db.affiliations.find({ enterpriseId: req.user.enterpriseId });
-  const restaurants  = await db.restaurants.find().map(({ password, ...r }) => r);
+  const restaurants  = (await db.restaurants.find()).map(({ password, ...r }) => r);
   const menus        = await db.menus.find();
 
   const result = affiliations.map(a => {
@@ -1354,7 +1354,7 @@ app.post('/api/subscriptions/:id/invoice', auth, requireRole('restauratrice'), a
   if (existingInvoices.find(i => i.subscriptionId === sub.id))
     return res.status(409).json({ error: 'Une facture a déjà été générée pour cet abonnement' });
 
-  const orders = await db.orders.find().filter(o =>
+  const orders = (await db.orders.find()).filter(o =>
     o.enterpriseId === sub.enterpriseId && o.restaurantId === req.user.id
   );
   if (!orders.length) return res.status(400).json({ error: "Aucune commande trouvée pour cette période d'abonnement" });
@@ -1509,15 +1509,15 @@ app.get('/api/stats/restaurant', auth, requireRole('restauratrice'), async (req,
 // ─────────────────────────────────────────────────────────────────────────────
 
 app.get('/api/admin/enterprises', auth, requireRole('superadmin'), async (req, res) => {
-  res.json(await db.enterprises.find().map(({ password, ...e }) => e));
+  res.json((await db.enterprises.find()).map(({ password, ...e }) => e));
 });
 
 app.get('/api/admin/restaurants', auth, requireRole('superadmin'), async (req, res) => {
-  res.json(await db.restaurants.find().map(({ password, ...r }) => r));
+  res.json((await db.restaurants.find()).map(({ password, ...r }) => r));
 });
 
 app.get('/api/admin/employees', auth, requireRole('superadmin'), async (req, res) => {
-  res.json(await db.employees.find().map(({ password, ...e }) => e));
+  res.json((await db.employees.find()).map(({ password, ...e }) => e));
 });
 
 app.get('/api/admin/stats', auth, requireRole('superadmin'), async (req, res) => {
@@ -1527,8 +1527,8 @@ app.get('/api/admin/stats', auth, requireRole('superadmin'), async (req, res) =>
   const enterprises = await db.enterprises.find();
   const restaurants = await db.restaurants.find();
   const employees   = await db.employees.find();
-  const choices     = await db.choices.find().filter(c => new Date(c.date) >= start);
-  const orders = await db.orders.find()
+  const choices     = (await db.choices.find()).filter(c => new Date(c.date) >= start);
+  const orders = (await db.orders.find())
     .filter(o => new Date(o.createdAt) >= start)
     .map(({ depositScreenshot, ...o }) => o);
 
@@ -1789,7 +1789,7 @@ app.post('/api/messages/read', auth, requireRole('enterprise', 'restauratrice'),
 });
 
 app.get('/api/messages/unread', auth, requireRole('enterprise', 'restauratrice'), async (req, res) => {
-  const count = await db.messages.find().filter(m =>
+  const count = (await db.messages.find()).filter(m =>
     m.recipientId === req.user.id && !m.readBy.includes(req.user.id)
   ).length;
   res.json({ count });
@@ -2041,8 +2041,8 @@ app.get('/api/stats/pdf/admin', auth, requireRole('superadmin'), async (req, res
   const enterprises = await db.enterprises.find();
   const restaurants = await db.restaurants.find();
   const employees   = await db.employees.find();
-  const orders      = await db.orders.find().filter(o => new Date(o.createdAt) >= start);
-  const choices     = await db.choices.find().filter(c => new Date(c.date) >= start);
+  const orders      = (await db.orders.find()).filter(o => new Date(o.createdAt) >= start);
+  const choices     = (await db.choices.find()).filter(c => new Date(c.date) >= start);
   const totalMob    = orders.reduce((s, o) => s + (o.totalAmount || 0), 0);
 
   const byResto = {};

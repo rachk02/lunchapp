@@ -131,7 +131,7 @@ function pwdMeter(input, meterId) {
   if (v.length >= 8) score++;
   if (/[A-Z]/.test(v)) score++;
   if (/[0-9]/.test(v)) score++;
-  if (/[@$!%*?&._-]/.test(v)) score++;
+  if (/[^A-Za-z0-9]/.test(v)) score++;
   const labels = ['', 'Faible', 'Moyen', 'Bon', 'Fort'];
   const colors = ['', '#EF4444', '#F97316', '#0EA5E9', '#22C55E'];
   const m = el(meterId);
@@ -368,7 +368,13 @@ async function doLogin() {
 }
 
 async function doRegister(type) {
+  const btnId = type === 'enterprise' ? 'btn-reg-ent' : 'btn-reg-rst';
+  const btn = el(btnId);
+  if (btn && btn.disabled) return;
+
   try {
+    if (btn) { btn.disabled = true; btn.textContent = 'Création en cours…'; }
+
     let d;
     if (type === 'enterprise') {
       const companyName = el('r-company').value.trim();
@@ -376,6 +382,7 @@ async function doRegister(type) {
       const phone    = el('r-phone').value.trim();
       const location = el('r-location').value.trim();
       const password = el('r-pwd').value;
+      if (!companyName || !email || !password) { toast('Veuillez remplir tous les champs obligatoires (*)', 'error'); return; }
       d = await api('POST', '/api/enterprise/register', { companyName, email, phone, location, password });
     } else {
       const restaurantName = el('r-rname').value.trim();
@@ -386,6 +393,7 @@ async function doRegister(type) {
       const specialty      = collectSpecialties('r-spec-container');
       const paymentInfo    = collectPayEntries('pay-entries');
       const password       = el('r-rpwd').value;
+      if (!restaurantName || !fullName || !email || !password) { toast('Veuillez remplir tous les champs obligatoires (*)', 'error'); return; }
       d = await api('POST', '/api/restauratrice/register', { restaurantName, fullName, email, phone, address, specialty, paymentInfo, password });
     }
     token = d.token;
@@ -394,7 +402,13 @@ async function doRegister(type) {
     localStorage.setItem('la_user', JSON.stringify(me));
     toast('Compte créé avec succès !', 'success');
     startApp();
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) {
+    toast(e.message, 'error');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = type === 'enterprise' ? 'Créer mon compte' : 'Créer mon restaurant';
+    }
+  }
 }
 
 function doLogout() {
