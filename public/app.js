@@ -373,9 +373,7 @@ async function doRegister(type) {
   if (btn && btn.disabled) return;
 
   try {
-    if (btn) { btn.disabled = true; btn.textContent = 'Création en cours…'; }
-
-    let d;
+    let body;
     if (type === 'enterprise') {
       const companyName = el('r-company').value.trim();
       const email    = el('r-email').value.trim();
@@ -383,7 +381,7 @@ async function doRegister(type) {
       const location = el('r-location').value.trim();
       const password = el('r-pwd').value;
       if (!companyName || !email || !password) { toast('Veuillez remplir tous les champs obligatoires (*)', 'error'); return; }
-      d = await api('POST', '/api/enterprise/register', { companyName, email, phone, location, password });
+      body = { endpoint: '/api/enterprise/register', data: { companyName, email, phone, location, password } };
     } else {
       const restaurantName = el('r-rname').value.trim();
       const fullName       = el('r-owner').value.trim();
@@ -394,8 +392,11 @@ async function doRegister(type) {
       const paymentInfo    = collectPayEntries('pay-entries');
       const password       = el('r-rpwd').value;
       if (!restaurantName || !fullName || !email || !password) { toast('Veuillez remplir tous les champs obligatoires (*)', 'error'); return; }
-      d = await api('POST', '/api/restauratrice/register', { restaurantName, fullName, email, phone, address, specialty, paymentInfo, password });
+      body = { endpoint: '/api/restauratrice/register', data: { restaurantName, fullName, email, phone, address, specialty, paymentInfo, password } };
     }
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Création en cours…'; }
+    let d = await api('POST', body.endpoint, body.data);
     token = d.token;
     me    = d.user;
     localStorage.setItem('la_token', token);
